@@ -1,21 +1,20 @@
 import type {
- Count,
- ExercisePrescription,
+  Count,
+  ExercisePrescription,
   ExerciseRole,
- Laterality,
- NumericRange,
+  Laterality,
+  NumericRange,
   ProgramLevel,
   ProgrammingSelection,
- ProgrammingTemplate,
- ProgrammingTemplateLevel,
+  ProgrammingTemplate,
+  ProgrammingTemplateLevel,
   ResolvedProgrammingLevel,
   SelectableExerciseSlot,
   SessionTimeEstimate,
   TrainingBlock,
   TrainingExercise,
 } from './types'
-import { getTrainingExercises } from './types'
-import { isSelectableExerciseSlot } from './types'
+import { getTrainingExercises, isSelectableExerciseSlot } from './types'
 
 const DEFAULT_SECONDS_PER_REP = 4
 const DEFAULT_SECONDS_PER_METER = 1
@@ -25,6 +24,7 @@ const DEFAULT_STRENGTH_REST_SECONDS = 90
 const DEFAULT_ROUND_REST_SECONDS = 75
 const DEFAULT_BLOCK_BUFFER_SECONDS = 45
 const DEFAULT_UNILATERAL_RESET_SECONDS = 10
+const DEFAULT_STRENGTH_TRANSITION_SECONDS = 45
 
 type WorkRange = {
   base: NumericRange
@@ -135,8 +135,12 @@ const resolveSelectableSlot = (
   const exercises: TrainingExercise[] = [{ ...selected }]
   let complementaryIncluded = false
   if (selection.includeComplementaryOption === true) {
-    if (slot.allowComplementaryOption !== true) {
-      throw new Error(`${path}: complementary option is not allowed`)
+    const optionKeys = slot.options.map((option) => option.exerciseKey)
+    if (slot.allowComplementaryOption !== true
+      || slot.options.length !== 2
+      || new Set(optionKeys).size !== 2
+      || slot.options.some((option) => option.role !== 'ACCESSORY')) {
+      throw new Error(`${path}: complementary option requires exactly two unique ACCESSORY options`)
     }
     const complementary = slot.options.find((option) => option.exerciseKey !== selected.exerciseKey)
     if (!complementary) {
@@ -157,6 +161,13 @@ export const resolveProgrammingLevel = (
   level: ProgrammingTemplateLevel,
   selection: ProgrammingSelection = {},
 ): ResolvedProgrammingLevel => {
+  const slotIds = new Set(level.blocks.flatMap((block) => block.exercises
+    .filter(isSelectableExerciseSlot)
+    .map((slot) => slot.id)))
+  const unknownSelectionId = Object.keys(selection.selectable ?? {}).find((slotId) => !slotIds.has(slotId))
+  if (unknownSelectionId) {
+    throw new Error(`selectable.${unknownSelectionId}: slot does not exist in this Programming level`)
+  }
   const selections: Record<string, string> = {}
   let optionalIncluded = false
   let complementaryIncluded = false
@@ -257,6 +268,10 @@ const validateExercise = (
     if (!['equipment', 'member-fit', 'regression', 'coach-choice', 'skill-track'].includes(alternative.reason)) {
       issues.push(issue('ALTERNATIVE_INVALID', alternativePath + '.reason', 'Alternative reason is required.'))
     }
+    if (alternative.reason === 'skill-track'
+      && (alternative.eligibility?.requiresTechniqueCompetency !== true || alternative.preserves?.stimulus !== false)) {
+      issues.push(issue('ALTERNATIVE_INVALID', alternativePath, 'Skill Track alternatives must require technique competency and must not claim identical stimulus.'))
+    }
     const preserves = alternative.preserves
     if (!preserves || typeof preserves.primaryGoal !== 'boolean'
       || typeof preserves.movementPattern !== 'boolean'
@@ -306,6 +321,31 @@ const validateSelectableSlot = (
     if (slot.options.some((option) => option.role !== 'ACCESSORY')) {
       issues.push(issue('COMPLEMENTARY_SLOT_INVALID', path + '.options', 'Both complementary options must use role ACCESSORY.'))
     }
+  }
+}
+
+const VALID_PROGRESSION_VARIABLES = new Set([
+  'load',
+  'volume',
+  'rir',
+  'rest',
+  'range',
+  'control',
+])
+
+const validateProgressionMetadata = (
+  level: ProgrammingTemplateLevel,
+  issues: AuditIssue[],
+): void => {
+  const progression = level.progressionFromPrevious
+  if (!progression) return
+  if (!Array.isArray(progression.variables)
+    || progression.variables.length === 0
+    || progression.variables.some((variable) => !VALID_PROGRESSION_VARIABLES.has(variable))) {
+    issues.push(issue('PROGRESSION_METADATA_INVALID', 'progressionFromPrevious.variables', 'Progression evidence must name at least one supported progression variable.'))
+  }
+  if (typeof progression.note !== 'string' || !progression.note.trim()) {
+    issues.push(issue('PROGRESSION_METADATA_INVALID', 'progressionFromPrevious.note', 'Progression evidence must include a non-empty design note.'))
   }
 }
 
@@ -435,6 +475,7 @@ export const auditSharedTemplateLevel = (
   })
   validatePrepAndRamp(level, issues)
   validateFatigueStack(level, issues)
+  validateProgressionMetadata(level, issues)
 
   const unilateralCount = formalExercises.filter((exercise) => exercise.laterality === 'unilateral').length
   if (unilateralCount > 5) {
@@ -830,6 +871,15 @@ const validateBodyBlockStructure = (
           issues.push(issue('STRENGTH_SETS_REQUIRED', path + '.exercises[' + exerciseIndex + '].prescription.sets', 'BODY Strength actions must define sets.'))
         }
       })
+      block.exercises.forEach((entry, entryIndex) => {
+        if (isSelectableExerciseSlot(entry)) {
+          entry.options.forEach((option, optionIndex) => {
+            if (countRange(option.prescription.sets) === null) {
+              issues.push(issue('STRENGTH_SETS_REQUIRED', path + '.exercises[' + entryIndex + '].options[' + optionIndex + '].prescription.sets', 'BODY selectable Strength options must define sets.'))
+            }
+          })
+        }
+      })
     }
   })
 }
@@ -861,6 +911,14 @@ export const auditBodyTemplateLevel = (
         'WORKING_SET_RANGE',
         'scenario[' + scenarioIndex + '].blocks',
         'BODY total working sets must remain within 12–16 for every resolved scenario.',
+      ))
+    }
+
+    if (resolved.exercises.filter((exercise) => exercise.laterality === 'unilateral').length > 1) {
+      issues.push(issue(
+        'BODY_UNILATERAL_COUNT',
+        'scenario[' + scenarioIndex + '].exercises',
+        'BODY should contain no more than one unilateral training exercise per resolved scenario.',
       ))
     }
 
@@ -954,7 +1012,11 @@ export const auditProgrammingTemplateSet = (
   return issues
 }
 
-const workRange = (prescription: ExercisePrescription, laterality?: Laterality): WorkRange => {
+const workRange = (
+  prescription: ExercisePrescription,
+  laterality?: Laterality,
+  sideRestSeconds?: Count,
+): WorkRange => {
   const base = prescription.durationSeconds !== undefined
     ? toRange(prescription.durationSeconds)
     : prescription.distanceMeters !== undefined
@@ -972,10 +1034,10 @@ const workRange = (prescription: ExercisePrescription, laterality?: Laterality):
 
   return {
     base: multiplyRange(base, 2),
-    unilateralAdjustment: {
-      min: DEFAULT_UNILATERAL_RESET_SECONDS,
-      max: DEFAULT_UNILATERAL_RESET_SECONDS,
-    },
+    unilateralAdjustment: addRange(
+      { min: DEFAULT_UNILATERAL_RESET_SECONDS, max: DEFAULT_UNILATERAL_RESET_SECONDS },
+      toRange(sideRestSeconds),
+    ),
   }
 }
 
@@ -990,9 +1052,9 @@ const blockBufferRange = (count: number): NumericRange => ({
 })
 
 /**
- * Conservative private-coaching planning window floors for the fixed 3C levels.
- * This overhead is separate from equipment setup and never replaces the
- * measurable-work validation performed by auditTemplateLevel.
+ * Conservative private-coaching planning window floors for every supported
+ * Programming level. This overhead is separate from equipment setup and never
+ * replaces measurable-work validation.
  */
 const MINIMUM_PLANNING_WINDOW_SECONDS: Record<ProgramLevel, number> = {
   l1: 34 * 60,
@@ -1001,17 +1063,21 @@ const MINIMUM_PLANNING_WINDOW_SECONDS: Record<ProgramLevel, number> = {
   l4: 44 * 60,
 }
 
-const minimumPlanningWindowSeconds = (level: ProgrammingTemplateLevel): number => (
-  MINIMUM_PLANNING_WINDOW_SECONDS[level.programLevel]
-  + level.blocks
+export const calculatePlanningFloorSeconds = (
+  level: ResolvableProgrammingLevel,
+  selection?: ProgrammingSelection,
+): number => {
+  const resolved = resolvedLevelFor(level, selection)
+  return MINIMUM_PLANNING_WINDOW_SECONDS[resolved.programLevel]
+  + resolved.blocks
     .filter((block) => block.kind === 'circuit')
-    .reduce((total, block) => total + block.exercises.length * 2 * 60, 0)
-)
+    .reduce((total, block) => total + getTrainingExercises(block).length * 2 * 60, 0)
+}
 
 const exerciseSets = (exercise: TrainingExercise): NumericRange => toRange(exercise.prescription.sets, 1)
 
 const estimatePrep = (level: ProgrammingTemplateLevel) => {
-  const work = level.prep.map((item) => workRange(item.prescription, item.laterality))
+  const work = level.prep.map((item) => workRange(item.prescription, item.laterality, item.sideRestSeconds))
   const baseWork = sumRanges(work.map((item) => item.base))
   const unilateralAdjustment = sumRanges(work.map((item) => item.unilateralAdjustment))
   const setup = itemSetupRange(level.prep.length)
@@ -1028,18 +1094,15 @@ const estimatePrep = (level: ProgrammingTemplateLevel) => {
 
 const estimateRampUp = (level: ProgrammingTemplateLevel) => {
   const ranges = level.rampUp.map((set) => {
-    const reps = multiplyRange(toRange(set.reps), DEFAULT_SECONDS_PER_REP)
-    const work = set.laterality === 'unilateral' ? multiplyRange(reps, 2) : reps
+    const work = workRange({ reps: set.reps }, set.laterality, set.sideRestSeconds)
     const rest = toRange(set.restSeconds)
-    return addRange(addRange(work, rest), itemSetupRange(1))
+    return addRange(addRange(work.base, rest), itemSetupRange(1))
   })
 
   return {
     base: sumRanges(ranges),
     unilateralAdjustment: sumRanges(level.rampUp.map((set) => (
-      set.laterality === 'unilateral'
-        ? { min: DEFAULT_UNILATERAL_RESET_SECONDS, max: DEFAULT_UNILATERAL_RESET_SECONDS }
-        : { min: 0, max: 0 }
+      workRange({ reps: set.reps }, set.laterality, set.sideRestSeconds).unilateralAdjustment
     ))),
   }
 }
@@ -1048,10 +1111,11 @@ const estimateStrength = (block: TrainingBlock) => {
   const execution: NumericRange[] = []
   const rest: NumericRange[] = []
   const unilateralAdjustment: NumericRange[] = []
+  const exercises = getTrainingExercises(block)
 
-  for (const exercise of getTrainingExercises(block)) {
+  for (const exercise of exercises) {
     const sets = exerciseSets(exercise)
-    const work = workRange(exercise.prescription, exercise.laterality)
+    const work = workRange(exercise.prescription, exercise.laterality, exercise.sideRestSeconds)
     execution.push(multiplyRange(work.base, sets))
     unilateralAdjustment.push(multiplyRange(work.unilateralAdjustment, sets))
 
@@ -1069,13 +1133,17 @@ const estimateStrength = (block: TrainingBlock) => {
     execution: sumRanges(execution),
     rest: sumRanges(rest),
     unilateralAdjustment: sumRanges(unilateralAdjustment),
+    transitions: {
+      min: Math.max(0, exercises.length - 1) * DEFAULT_STRENGTH_TRANSITION_SECONDS,
+      max: Math.max(0, exercises.length - 1) * DEFAULT_STRENGTH_TRANSITION_SECONDS,
+    },
   }
 }
 
 const estimateCircuit = (block: TrainingBlock) => {
   const rounds = toRange(block.rounds, 1)
   const exercises = getTrainingExercises(block)
-  const work = exercises.map((exercise) => workRange(exercise.prescription, exercise.laterality))
+  const work = exercises.map((exercise) => workRange(exercise.prescription, exercise.laterality, exercise.sideRestSeconds))
   const basePerRound = sumRanges(work.map((item) => item.base))
   const unilateralPerRound = sumRanges(work.map((item) => item.unilateralAdjustment))
   const transitionSeconds = toRange(block.transitionSeconds, DEFAULT_STATION_TRANSITION_SECONDS)
@@ -1116,7 +1184,10 @@ export const estimateSessionMinutes = (
   const strengthExecution = sumRanges(strength.map((item) => item.execution))
   const strengthRest = sumRanges(strength.map((item) => item.rest))
   const circuitWork = sumRanges(circuit.map((item) => item.work))
-  const transitions = sumRanges(circuit.map((item) => item.stationTransitions))
+  const transitions = sumRanges([
+    ...strength.map((item) => item.transitions),
+    ...circuit.map((item) => item.stationTransitions),
+  ])
   const roundRest = sumRanges(circuit.map((item) => item.roundRest))
   const unilateralAdjustment = sumRanges([
     prep.unilateralAdjustment,
@@ -1143,7 +1214,7 @@ export const estimateSessionMinutes = (
   const totalWithEquipmentBuffer = addRange(totalBeforeEquipmentBuffer, equipmentBuffer)
   const planningOverheadSupplement = Math.max(
     0,
-    minimumPlanningWindowSeconds(resolved) - totalWithEquipmentBuffer.max,
+    calculatePlanningFloorSeconds(resolved) - totalWithEquipmentBuffer.max,
   )
   const planningOverhead = {
     min: planningOverheadSupplement,

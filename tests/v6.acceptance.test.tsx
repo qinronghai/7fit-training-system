@@ -23,12 +23,20 @@ describe('7Fit V6 content contract', () => {
 
   it('keeps every template level App-compatible after the Programming adapter', () => {
     expect(templates.filter((template) => template.system === '3c')).toHaveLength(6)
+    expect(templates.filter((template) => template.system === 'body')).toHaveLength(5)
     for (const template of templates) {
       for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
         expect(template.levels[level].warmup.length).toBeGreaterThan(0)
         expect(template.levels[level].exercises.length).toBeGreaterThan(0)
       }
     }
+  })
+
+  it('uses the resolved BODY default rather than the historical compound BODY content', () => {
+    const body05L4 = templates.find((template) => template.id === 'body5')!.levels.l4
+    expect(body05L4.exercises).toHaveLength(5)
+    expect(body05L4.exercises.map((exercise) => exercise.name)).toContain('哑铃弯举')
+    expect(body05L4.exercises.map((exercise) => exercise.name)).not.toContain('侧平举 + 后束飞鸟 + 三头')
   })
 
   it('keeps PP01–PP26 extracted coach-card text and the 34 bidirectional pattern edges', () => {

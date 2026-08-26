@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isSelectableExerciseSlot,
   isTrainingExercise,
+  getTrainingExercises,
   type Count,
   type ExercisePrescription,
   type ProgrammingTemplateLevel,
@@ -10,14 +11,18 @@ import {
   type TrainingExercise,
 } from '../src/data/programming/types'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
+import { bodyTemplates } from '../src/data/programming/bodyTemplates'
+import { getTemplate } from '../src/data/content'
 import {
   audit3CTemplateLevel,
   audit3CTemplateSet,
+  auditBodyTemplateSet,
   auditBodyTemplateLevel,
   auditProgrammingTemplateSet,
   auditSharedTemplateLevel,
   auditTemplateSet,
   auditTemplateLevel,
+  calculatePlanningFloorSeconds,
   calculateWorkingSetEstimate,
   estimateSessionMinutes,
   resolveProgrammingLevel,
@@ -300,6 +305,74 @@ describe('BODY working-set audit', () => {
     expect(withComplementary.totalMinutes.max).toBeGreaterThanOrEqual(selected.totalMinutes.max)
   })
 
+  it('includes Strength exercise transitions in the real time budget', () => {
+    const estimate = estimateSessionMinutes(bodyFixtureLevel)
+    expect(estimate.transitionMinutes).toBeGreaterThan(0)
+  })
+
+  it('adds prescribed side rest without changing unilateral working-set count', () => {
+    const withoutSideRest = {
+      ...bodyFixtureLevel,
+      blocks: bodyFixtureLevel.blocks.map((block) => ({
+        ...block,
+        exercises: block.exercises.map((entry) => (
+          'exerciseKey' in entry && entry.role === 'PRIMARY'
+            ? { ...entry, laterality: 'unilateral' as const }
+            : entry
+        )),
+      })),
+    }
+    const withSideRest = {
+      ...withoutSideRest,
+      blocks: withoutSideRest.blocks.map((block) => ({
+        ...block,
+        exercises: block.exercises.map((entry) => (
+          'exerciseKey' in entry && entry.role === 'PRIMARY'
+            ? { ...entry, sideRestSeconds: 20 }
+            : entry
+        )),
+      })),
+    }
+
+    expect(calculateWorkingSetEstimate(withSideRest)).toEqual(calculateWorkingSetEstimate(withoutSideRest))
+    expect(estimateSessionMinutes(withSideRest).unilateralAdjustmentMinutes
+      - estimateSessionMinutes(withoutSideRest).unilateralAdjustmentMinutes).toBeCloseTo((20 * 4) / 60)
+  })
+
+  it('uses the same level-based planning floor for BODY and 3C shapes', () => {
+    expect(calculatePlanningFloorSeconds(bodyFixtureLevel)).toBe(37 * 60)
+    expect(calculatePlanningFloorSeconds(threeCTemplates.find((template) => template.id === '3c3')!.levels.l4)).toBeGreaterThan(44 * 60)
+  })
+
+  it('keeps design estimates and progression evidence at Level scope', () => {
+    const annotated = {
+      ...bodyFixtureLevel,
+      targetMuscleSetEstimate: { gluteus: 8, quadriceps: { min: 3, max: 4 } },
+      progressionFromPrevious: {
+        variables: ['load' as const, 'rir' as const],
+        note: 'Increase load while preserving the same stable movement options.',
+      },
+    }
+
+    expect(annotated.targetMuscleSetEstimate).toEqual({ gluteus: 8, quadriceps: { min: 3, max: 4 } })
+    expect(auditBodyTemplateLevel(annotated)).toEqual([])
+  })
+
+  it('rejects empty progression evidence without treating design estimates as hard audit metrics', () => {
+    const malformed = {
+      ...bodyFixtureLevel,
+      targetMuscleSetEstimate: { gluteus: -100 },
+      progressionFromPrevious: { variables: [], note: ' ' },
+    }
+
+    expect(auditBodyTemplateLevel(malformed)).toContainEqual(
+      expect.objectContaining({ code: 'PROGRESSION_METADATA_INVALID' }),
+    )
+    expect(auditBodyTemplateLevel(malformed)).not.toContainEqual(
+      expect.objectContaining({ code: 'TARGET_MUSCLE_SET_INVALID' }),
+    )
+  })
+
   it('calculates total working sets from the resolved selection as a NumericRange', () => {
     const selected = calculateWorkingSetEstimate(bodyFixtureLevel, {
       selectable: { 'body-arm': accessoryOption.exerciseKey },
@@ -344,5 +417,78 @@ describe('BODY working-set audit', () => {
     expect(auditBodyTemplateLevel(circuitBody)).toContainEqual(
       expect.objectContaining({ code: 'BODY_CIRCUIT_FORBIDDEN' }),
     )
+  })
+})
+
+describe('BODY Programming V1 frozen source', () => {
+  it('contains exactly BODY01 through BODY05 with four levels each', () => {
+    expect(bodyTemplates.map((template) => template.id)).toEqual([
+      'body1',
+      'body2',
+      'body3',
+      'body4',
+      'body5',
+    ])
+    expect(bodyTemplates.every((template) => template.system === 'body'
+      && Object.keys(template.levels).length === 4)).toBe(true)
+  })
+
+  it('passes every BODY hard audit scenario', () => {
+    expect(auditBodyTemplateSet(bodyTemplates)).toEqual([])
+  })
+
+  it('audits the combined Programming source through the system dispatcher', () => {
+    expect(auditProgrammingTemplateSet([...threeCTemplates, ...bodyTemplates])).toEqual([])
+  })
+
+  it('keeps the frozen BODY special cases explicit', () => {
+    const body01L4 = bodyTemplates.find((template) => template.id === 'body1')!.levels.l4
+    const body02L3 = bodyTemplates.find((template) => template.id === 'body2')!.levels.l3
+    const body02L4 = bodyTemplates.find((template) => template.id === 'body2')!.levels.l4
+    const body03L3 = bodyTemplates.find((template) => template.id === 'body3')!.levels.l3
+    const body03L4 = bodyTemplates.find((template) => template.id === 'body3')!.levels.l4
+    const body04L3 = bodyTemplates.find((template) => template.id === 'body4')!.levels.l3
+    const body04L4 = bodyTemplates.find((template) => template.id === 'body4')!.levels.l4
+    const body05L4 = bodyTemplates.find((template) => template.id === 'body5')!.levels.l4
+
+    expect(getTrainingExercises(body01L4.blocks[0])[0]).toMatchObject({ exerciseKey: 'heavy-hack-squat' })
+    expect(getTrainingExercises(body01L4.blocks[0])[0].alternatives?.[0]).toMatchObject({
+      exerciseKey: 'barbell-squat',
+      reason: 'skill-track',
+      preserves: { primaryGoal: true, movementPattern: true, stimulus: false },
+      eligibility: { requiresTechniqueCompetency: true },
+    })
+    expect(getTrainingExercises(body02L3.blocks[0]).some((exercise) => exercise.laterality === 'unilateral')).toBe(false)
+    expect(getTrainingExercises(body02L4.blocks[0]).some((exercise) => exercise.laterality === 'unilateral')).toBe(false)
+    expect(calculateWorkingSetEstimate(body03L3)).toEqual({ min: 13, max: 13 })
+    expect(calculateWorkingSetEstimate(body03L4)).toEqual({ min: 13, max: 13 })
+    expect(getTrainingExercises(body04L3.blocks[0]).map((exercise) => exercise.exerciseKey)).toEqual([
+      'incline-dumbbell-press',
+      'seated-dumbbell-shoulder-press',
+      'cable-fly',
+      'lateral-raise',
+      'rope-triceps-pressdown',
+    ])
+    expect(getTrainingExercises(body04L4.blocks[0]).map((exercise) => exercise.exerciseKey)).toEqual([
+      'barbell-bench-press',
+      'seated-dumbbell-shoulder-press',
+      'cable-fly',
+      'lateral-raise',
+      'rope-triceps-pressdown',
+    ])
+    const armSlot = body05L4.blocks[0].exercises.find(isSelectableExerciseSlot)
+    expect(armSlot?.options).toHaveLength(2)
+    expect(resolveProgrammingLevel(body05L4).exercises).toHaveLength(5)
+    expect(resolveProgrammingLevel(body05L4, { includeComplementaryOption: true }).exercises).toHaveLength(6)
+  })
+
+  it('adapts the resolved BODY source to the legacy App shape by default', () => {
+    const body05 = getTemplate('body5')!.levels.l4
+    const body01 = getTemplate('body1')!.levels.l4
+
+    expect(body05.exercises).toHaveLength(5)
+    expect(body05.exercises.map((exercise) => exercise.name)).toContain('哑铃弯举')
+    expect(body05.exercises.map((exercise) => exercise.name)).not.toContain('绳索三头下压')
+    expect(body01.exercises[0].name).toBe('大负荷哈克深蹲')
   })
 })
