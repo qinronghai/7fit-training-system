@@ -12,6 +12,7 @@ import {
   auditTemplateSet,
   estimateSessionMinutes,
 } from '../src/data/programming/rules'
+import { getTemplate } from '../src/data/content'
 
 const typeContractLevel: ProgramLevel = 'l3'
 
@@ -317,5 +318,20 @@ describe('3C Programming V1 audit rules', () => {
       min: 0,
       max: validLevel.estimatedMinutes.max,
     })).filter((issue) => issue.code === 'ESTIMATE_MISMATCH')).toEqual([])
+  })
+})
+
+describe('3C Programming V1 compatibility adapter', () => {
+  it('adapts the new 3C source into the existing App shape', () => {
+    const level = getTemplate('3c3')!.levels.l1
+    expect(level.warmup.length).toBeGreaterThan(0)
+    expect(level.exercises.map((item) => item.name)).toContain('双侧 Farmer Carry')
+    expect(level.exercises.map((item) => item.name)).not.toContain('低箱台阶上步')
+  })
+
+  it('flattens Strength then 3C in order for the unchanged App', () => {
+    const level = getTemplate('3c6')!.levels.l4
+    expect(level.exercises[0].name).toContain('双哑铃')
+    expect(level.exercises.map((item) => item.name)).toContain('哑铃胸托划船')
   })
 })
