@@ -19,6 +19,7 @@ import {
   auditTemplateSet,
   auditTemplateLevel,
   calculateWorkingSetEstimate,
+  estimateSessionMinutes,
   resolveProgrammingLevel,
 } from '../src/data/programming/rules'
 
@@ -283,6 +284,20 @@ describe('BODY working-set audit', () => {
     }
 
     expect(calculateWorkingSetEstimate(ranged)).toEqual({ min: 11, max: 12 })
+  })
+
+  it('resolves selectable scenarios before calculating session time', () => {
+    const selected = estimateSessionMinutes(bodyFixtureLevel, {
+      selectable: { 'body-arm': accessoryOption.exerciseKey },
+    })
+    const withComplementary = estimateSessionMinutes(bodyFixtureLevel, {
+      selectable: { 'body-arm': accessoryOption.exerciseKey },
+      includeComplementaryOption: true,
+    })
+
+    expect(withComplementary.equipmentBufferMinutes).toBeGreaterThan(selected.equipmentBufferMinutes)
+    expect(withComplementary.strengthExecutionMinutes).toBeGreaterThan(selected.strengthExecutionMinutes)
+    expect(withComplementary.totalMinutes.max).toBeGreaterThanOrEqual(selected.totalMinutes.max)
   })
 
   it('calculates total working sets from the resolved selection as a NumericRange', () => {

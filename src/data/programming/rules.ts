@@ -1102,12 +1102,14 @@ const estimateCircuit = (block: TrainingBlock) => {
 }
 
 export const estimateSessionMinutes = (
-  level: ProgrammingTemplateLevel,
+  level: ResolvableProgrammingLevel,
+  selection?: ProgrammingSelection,
 ): SessionTimeEstimate => {
-  const prep = estimatePrep(level)
-  const rampUp = estimateRampUp(level)
-  const strengthBlocks = level.blocks.filter((block) => block.kind === 'strength')
-  const circuitBlocks = level.blocks.filter((block) => block.kind === 'circuit')
+  const resolved = resolvedLevelFor(level, selection)
+  const prep = estimatePrep(resolved)
+  const rampUp = estimateRampUp(resolved)
+  const strengthBlocks = resolved.blocks.filter((block) => block.kind === 'strength')
+  const circuitBlocks = resolved.blocks.filter((block) => block.kind === 'circuit')
   const strength = strengthBlocks.map(estimateStrength)
   const circuit = circuitBlocks.map(estimateCircuit)
 
@@ -1123,8 +1125,8 @@ export const estimateSessionMinutes = (
     ...circuit.map((item) => item.unilateralAdjustment),
   ])
   const baseEquipmentBuffer = addRange(
-    blockBufferRange(level.blocks.length),
-    itemSetupRange(level.blocks.reduce((count, block) => count + block.exercises.length, 0)),
+    blockBufferRange(resolved.blocks.length),
+    itemSetupRange(resolved.blocks.reduce((count, block) => count + block.exercises.length, 0)),
   )
 
   const totalBeforeEquipmentBuffer = sumRanges([
@@ -1141,7 +1143,7 @@ export const estimateSessionMinutes = (
   const totalWithEquipmentBuffer = addRange(totalBeforeEquipmentBuffer, equipmentBuffer)
   const planningOverheadSupplement = Math.max(
     0,
-    minimumPlanningWindowSeconds(level) - totalWithEquipmentBuffer.max,
+    minimumPlanningWindowSeconds(resolved) - totalWithEquipmentBuffer.max,
   )
   const planningOverhead = {
     min: planningOverheadSupplement,
