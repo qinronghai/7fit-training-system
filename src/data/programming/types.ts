@@ -125,6 +125,7 @@ export type SessionTimeEstimate = {
   strengthRestMinutes: number
   circuitWorkMinutes: number
   transitionMinutes: number
+  roundRestMinutes: number
   unilateralAdjustmentMinutes: number
   equipmentBufferMinutes: number
   totalMinutes: NumericRange
