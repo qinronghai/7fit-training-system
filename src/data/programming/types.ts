@@ -128,5 +128,6 @@ export type SessionTimeEstimate = {
   roundRestMinutes: number
   unilateralAdjustmentMinutes: number
   equipmentBufferMinutes: number
+  planningOverheadMinutes: number
   totalMinutes: NumericRange
 }

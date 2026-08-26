@@ -322,13 +322,62 @@ export const auditTemplateLevel = (
   return issues
 }
 
-const sameKeys = (
+const normalizeCount = (value: Count | undefined): NumericRange | null => {
+  if (value === undefined) return null
+  return typeof value === 'number'
+    ? { min: value, max: value }
+    : { min: value.min, max: value.max }
+}
+
+const sameCount = (actual: Count | undefined, expected: Count | undefined): boolean => {
+  const actualRange = normalizeCount(actual)
+  const expectedRange = normalizeCount(expected)
+  return actualRange?.min === expectedRange?.min
+    && actualRange?.max === expectedRange?.max
+}
+
+const PRESCRIPTION_FIELDS: readonly (keyof ExercisePrescription)[] = [
+  'sets',
+  'reps',
+  'durationSeconds',
+  'distanceMeters',
+  'rpe',
+  'rir',
+]
+
+const samePrescription = (
+  actual: ExercisePrescription,
+  expected: ExercisePrescription,
+): boolean => PRESCRIPTION_FIELDS.every((field) => sameCount(actual[field], expected[field]))
+
+type ExerciseExpectation = Pick<TrainingExercise, 'exerciseKey' | 'role' | 'laterality'> & {
+  prescription: ExercisePrescription
+}
+
+const matchesExercise = (
+  actual: TrainingExercise | undefined,
+  expected: ExerciseExpectation | undefined,
+): boolean => Boolean(
+  actual
+  && expected
+  && actual.exerciseKey === expected.exerciseKey
+  && actual.role === expected.role
+  && actual.laterality === expected.laterality
+  && samePrescription(actual.prescription, expected.prescription),
+)
+
+const matchesExerciseBlock = (
   level: ProgrammingTemplateLevel,
   blockIndex: number,
-  keys: readonly string[],
-): boolean => (
-  level.blocks[blockIndex]?.exercises.map((exercise) => exercise.exerciseKey).join('|') === keys.join('|')
-)
+  expected: readonly ExerciseExpectation[],
+): boolean => {
+  const actual = level.blocks[blockIndex]?.exercises
+  return Boolean(
+    actual
+    && actual.length === expected.length
+    && actual.every((exercise, index) => matchesExercise(exercise, expected[index])),
+  )
+}
 
 const hasBarbellLanguage = (level: ProgrammingTemplateLevel): boolean => (
   [
@@ -349,18 +398,39 @@ const validateSpecialCases = (
   const l4 = template.levels.l4
 
   if (template.id === '3c3') {
-    const l1Keys = l1.blocks[0]?.exercises.map((exercise) => exercise.exerciseKey)
-    const l1Roles = l1.blocks[0]?.exercises.map((exercise) => exercise.role)
-    const expectedL1Keys = [
-      'supported-split-squat',
-      'seated-row',
-      'machine-chest-press',
-      'bilateral-farmer-carry',
-      'dead-bug',
+    const expectedL1Exercises: ExerciseExpectation[] = [
+      {
+        exerciseKey: 'supported-split-squat',
+        role: 'PRIMARY',
+        laterality: 'unilateral',
+        prescription: { reps: { min: 8, max: 10 }, rir: { min: 3, max: 4 } },
+      },
+      {
+        exerciseKey: 'seated-row',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { reps: { min: 10, max: 12 } },
+      },
+      {
+        exerciseKey: 'machine-chest-press',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { reps: 10 },
+      },
+      {
+        exerciseKey: 'bilateral-farmer-carry',
+        role: 'CARRY',
+        laterality: 'bilateral',
+        prescription: { distanceMeters: 20 },
+      },
+      {
+        exerciseKey: 'dead-bug',
+        role: 'CORE',
+        laterality: 'bilateral',
+        prescription: { reps: { min: 8, max: 10 } },
+      },
     ]
-    if (l1Keys?.join('|') !== expectedL1Keys.join('|')
-      || l1Roles?.join('|') !== ['PRIMARY', 'SECONDARY', 'SECONDARY', 'CARRY', 'CORE'].join('|')
-      || l1Keys?.includes('low-box-step')) {
+    if (!matchesExerciseBlock(l1, 0, expectedL1Exercises)) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l1', '3C03 L1 must use one supported split squat plus row, chest press, bilateral Farmer Carry and dead bug.'))
     }
     if (l1.blocks[0]?.exercises.filter((exercise) => exercise.movementPattern === 'single').length !== 1) {
@@ -369,11 +439,45 @@ const validateSpecialCases = (
 
     const l4Circuit = l4.blocks[1]
     const l4Rounds = countRange(l4Circuit?.rounds)
-    if (!sameKeys(l4, 0, ['front-foot-elevated-split-squat', 'chest-supported-row'])
-      || !sameKeys(l4, 1, ['double-dumbbell-rdl', 'seated-dumbbell-shoulder-press', 'suitcase-carry'])
+    const expectedL4Strength: ExerciseExpectation[] = [
+      {
+        exerciseKey: 'front-foot-elevated-split-squat',
+        role: 'PRIMARY',
+        laterality: 'unilateral',
+        prescription: { sets: { min: 3, max: 4 }, reps: { min: 6, max: 8 }, rir: 2 },
+      },
+      {
+        exerciseKey: 'chest-supported-row',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { sets: 3, reps: { min: 6, max: 8 }, rir: 2 },
+      },
+    ]
+    const expectedL4Circuit: ExerciseExpectation[] = [
+      {
+        exerciseKey: 'double-dumbbell-rdl',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { reps: 8 },
+      },
+      {
+        exerciseKey: 'seated-dumbbell-shoulder-press',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { reps: { min: 6, max: 8 } },
+      },
+      {
+        exerciseKey: 'suitcase-carry',
+        role: 'CARRY',
+        laterality: 'unilateral',
+        prescription: { distanceMeters: 20 },
+      },
+    ]
+    if (!matchesExerciseBlock(l4, 0, expectedL4Strength)
+      || !matchesExerciseBlock(l4, 1, expectedL4Circuit)
       || l4Rounds?.min !== 2
       || l4Rounds?.max !== 3
-      || l4Circuit?.restBetweenRoundsSeconds !== 90
+      || !sameCount(l4Circuit?.restBetweenRoundsSeconds, 90)
       || (l4Circuit?.exercises ?? []).some((exercise) => exercise.prescription.sets !== undefined)) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l4', '3C03 L4 must use the frozen Strength plus three-action Circuit prescription.'))
     }
@@ -384,9 +488,49 @@ const validateSpecialCases = (
     if (programLevels.some((programLevel) => hasBarbellLanguage(template.levels[programLevel]))) {
       issues.push(issue('SPECIAL_CASE', template.id, '3C06 must keep KB/DB language and contain no barbell language.'))
     }
-    if (!sameKeys(l4, 0, ['heavy-double-dumbbell-rdl', 'dumbbell-chest-supported-row'])
-      || !sameKeys(l4, 1, ['double-dumbbell-front-squat', 'seated-dumbbell-shoulder-press', 'bilateral-farmer-carry'])
-      || l4.blocks[0]?.exercises[0]?.alternatives?.[0]?.exerciseKey !== 'double-kettlebell-rdl') {
+    const expectedL4Strength: ExerciseExpectation[] = [
+      {
+        exerciseKey: 'heavy-double-dumbbell-rdl',
+        role: 'PRIMARY',
+        laterality: 'bilateral',
+        prescription: { sets: { min: 3, max: 4 }, reps: { min: 5, max: 6 }, rir: 2 },
+      },
+      {
+        exerciseKey: 'dumbbell-chest-supported-row',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { sets: 3, reps: { min: 6, max: 8 }, rir: 2 },
+      },
+    ]
+    const expectedL4Circuit: ExerciseExpectation[] = [
+      {
+        exerciseKey: 'double-dumbbell-front-squat',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { reps: { min: 6, max: 8 } },
+      },
+      {
+        exerciseKey: 'seated-dumbbell-shoulder-press',
+        role: 'SECONDARY',
+        laterality: 'bilateral',
+        prescription: { reps: { min: 6, max: 8 } },
+      },
+      {
+        exerciseKey: 'bilateral-farmer-carry',
+        role: 'CARRY',
+        laterality: 'bilateral',
+        prescription: { distanceMeters: { min: 20, max: 30 } },
+      },
+    ]
+    const primaryAlternative = l4.blocks[0]?.exercises[0]?.alternatives?.[0]
+    const alternativeValid = primaryAlternative?.exerciseKey === 'double-kettlebell-rdl'
+      && primaryAlternative.reason === 'equipment'
+      && primaryAlternative.preserves.primaryGoal === true
+      && primaryAlternative.preserves.movementPattern === true
+      && primaryAlternative.preserves.stimulus === true
+    if (!matchesExerciseBlock(l4, 0, expectedL4Strength)
+      || !matchesExerciseBlock(l4, 1, expectedL4Circuit)
+      || !alternativeValid) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l4', '3C06 L4 must use the frozen heavy double-dumbbell Strength Block and KB/DB Circuit.'))
     }
   }
@@ -475,10 +619,10 @@ const workRange = (prescription: ExercisePrescription, laterality?: Laterality):
   }
 
   return {
-    base,
+    base: multiplyRange(base, 2),
     unilateralAdjustment: {
-      min: base.min + DEFAULT_UNILATERAL_RESET_SECONDS,
-      max: base.max + DEFAULT_UNILATERAL_RESET_SECONDS,
+      min: DEFAULT_UNILATERAL_RESET_SECONDS,
+      max: DEFAULT_UNILATERAL_RESET_SECONDS,
     },
   }
 }
@@ -493,15 +637,20 @@ const blockBufferRange = (count: number): NumericRange => ({
   max: count * DEFAULT_BLOCK_BUFFER_SECONDS,
 })
 
-const MINIMUM_STATIC_SESSION_BASE_SECONDS: Record<ProgramLevel, number> = {
+/**
+ * Conservative private-coaching planning window floors for the fixed 3C levels.
+ * This overhead is separate from equipment setup and never replaces the
+ * measurable-work validation performed by auditTemplateLevel.
+ */
+const MINIMUM_PLANNING_WINDOW_SECONDS: Record<ProgramLevel, number> = {
   l1: 34 * 60,
   l2: 37 * 60,
   l3: 42 * 60,
   l4: 44 * 60,
 }
 
-const minimumStaticSessionSeconds = (level: ProgrammingTemplateLevel): number => (
-  MINIMUM_STATIC_SESSION_BASE_SECONDS[level.programLevel]
+const minimumPlanningWindowSeconds = (level: ProgrammingTemplateLevel): number => (
+  MINIMUM_PLANNING_WINDOW_SECONDS[level.programLevel]
   + level.blocks
     .filter((block) => block.kind === 'circuit')
     .reduce((total, block) => total + block.exercises.length * 2 * 60, 0)
@@ -528,8 +677,9 @@ const estimatePrep = (level: ProgrammingTemplateLevel) => {
 const estimateRampUp = (level: ProgrammingTemplateLevel) => {
   const ranges = level.rampUp.map((set) => {
     const reps = multiplyRange(toRange(set.reps), DEFAULT_SECONDS_PER_REP)
+    const work = set.laterality === 'unilateral' ? multiplyRange(reps, 2) : reps
     const rest = toRange(set.restSeconds)
-    return addRange(addRange(reps, rest), itemSetupRange(1))
+    return addRange(addRange(work, rest), itemSetupRange(1))
   })
 
   return {
@@ -634,15 +784,17 @@ export const estimateSessionMinutes = (
     roundRest,
     unilateralAdjustment,
   ])
-  const equipmentSupplement = Math.max(
+  const equipmentBuffer = baseEquipmentBuffer
+  const totalWithEquipmentBuffer = addRange(totalBeforeEquipmentBuffer, equipmentBuffer)
+  const planningOverheadSupplement = Math.max(
     0,
-    minimumStaticSessionSeconds(level) - totalBeforeEquipmentBuffer.max - baseEquipmentBuffer.max,
+    minimumPlanningWindowSeconds(level) - totalWithEquipmentBuffer.max,
   )
-  const equipmentBuffer = addRange(
-    baseEquipmentBuffer,
-    { min: equipmentSupplement, max: equipmentSupplement },
-  )
-  const totalSeconds = addRange(totalBeforeEquipmentBuffer, equipmentBuffer)
+  const planningOverhead = {
+    min: planningOverheadSupplement,
+    max: planningOverheadSupplement,
+  }
+  const totalSeconds = addRange(totalWithEquipmentBuffer, planningOverhead)
 
   return {
     prepMinutes: prep.base.max / 60,
@@ -654,6 +806,7 @@ export const estimateSessionMinutes = (
     roundRestMinutes: roundRest.max / 60,
     unilateralAdjustmentMinutes: unilateralAdjustment.max / 60,
     equipmentBufferMinutes: equipmentBuffer.max / 60,
+    planningOverheadMinutes: planningOverhead.max / 60,
     totalMinutes: {
       min: totalSeconds.min / 60,
       max: totalSeconds.max / 60,

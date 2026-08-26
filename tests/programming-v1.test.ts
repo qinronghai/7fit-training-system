@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type {
   AlternativeExercise,
   ExercisePrescription,
+  Laterality,
   ProgramLevel,
+  TrainingExercise,
   ProgrammingTemplateLevel,
   TrainingBlock,
 } from '../src/data/programming/types'
@@ -154,7 +156,49 @@ const fixtureLevel: ProgrammingTemplateLevel = {
   coachNote: 'fixture',
 }
 
+const makeRampTimingLevel = (laterality: Laterality): ProgrammingTemplateLevel => ({
+  ...fixtureLevel,
+  prep: [],
+  rampUp: [{
+    exerciseKey: 'fixture-ramp',
+    displayName: 'Fixture Ramp',
+    order: 1,
+    reps: 6,
+    loadGuidance: 'light',
+    restSeconds: 0,
+    targetRole: 'PRIMARY',
+    laterality,
+  }],
+  blocks: [{
+    id: 'circuit',
+    kind: 'circuit',
+    label: 'Circuit Anchor',
+    rounds: 1,
+    restBetweenRoundsSeconds: 0,
+    transitionSeconds: 0,
+    exercises: [{
+      exerciseKey: 'fixture-anchor',
+      displayName: 'Fixture Anchor',
+      role: 'SECONDARY',
+      movementPattern: 'core',
+      laterality: 'bilateral',
+      fatigueRisk: 'low',
+      prescription: { durationSeconds: 3000 },
+    }],
+  }],
+})
+
 describe('3C Programming V1 static time estimate', () => {
+  it('counts unilateral Ramp-up reps on both sides plus a separate reset buffer', () => {
+    const bilateral = estimateSessionMinutes(makeRampTimingLevel('bilateral'))
+    const unilateral = estimateSessionMinutes(makeRampTimingLevel('unilateral'))
+
+    expect(bilateral.rampUpMinutes).toBeCloseTo((6 * 4 + 15) / 60)
+    expect(unilateral.rampUpMinutes).toBeCloseTo((6 * 4 * 2 + 15) / 60)
+    expect(unilateral.unilateralAdjustmentMinutes - bilateral.unilateralAdjustmentMinutes).toBeCloseTo(10 / 60)
+    expect(unilateral.totalMinutes.max - bilateral.totalMinutes.max).toBeCloseTo((6 * 4 + 10) / 60)
+  })
+
   it('uses action rest before the Strength Block default', () => {
     const estimate = estimateSessionMinutes(fixtureLevel)
     expect(estimate.strengthRestMinutes).toBe(1.5)
@@ -184,9 +228,17 @@ describe('3C Programming V1 static time estimate', () => {
       + estimate.transitionMinutes
       + estimate.roundRestMinutes
       + estimate.unilateralAdjustmentMinutes
-      + estimate.equipmentBufferMinutes,
+      + estimate.equipmentBufferMinutes
+      + estimate.planningOverheadMinutes,
       10,
     )
+  })
+
+  it('keeps equipment setup separate from private-coaching planning overhead', () => {
+    const estimate = estimateSessionMinutes(fixtureLevel)
+
+    expect(estimate.equipmentBufferMinutes).toBeCloseTo((2 * 45 + 3 * 15) / 60)
+    expect(estimate.planningOverheadMinutes).toBeGreaterThan(0)
   })
 })
 
@@ -226,6 +278,18 @@ const withCircuitSets = (source: ProgrammingTemplateLevel): ProgrammingTemplateL
     : block),
 })
 
+const withoutStrengthSets = (source: ProgrammingTemplateLevel): ProgrammingTemplateLevel => ({
+  ...source,
+  blocks: source.blocks.map((block, blockIndex) => blockIndex === 0
+    ? {
+      ...block,
+      exercises: block.exercises.map((item, index) => index === 0
+        ? { ...item, prescription: { ...item.prescription, sets: undefined } }
+        : item),
+    }
+    : block),
+})
+
 const withHighRiskL3CircuitAction = (source: ProgrammingTemplateLevel): ProgrammingTemplateLevel => ({
   ...source,
   blocks: source.blocks.map((block, blockIndex) => blockIndex === 1 && block.kind === 'circuit'
@@ -254,6 +318,24 @@ const withEstimatedMinutes = (
   estimatedMinutes,
 })
 
+const mutateExercise = (
+  templateId: string,
+  programLevel: ProgramLevel,
+  blockIndex: number,
+  exerciseKey: string,
+  mutate: (exercise: TrainingExercise) => void,
+) => {
+  const copy = structuredClone(threeCTemplates)
+  const exercise = copy
+    .find((template) => template.id === templateId)!
+    .levels[programLevel]
+    .blocks[blockIndex]
+    .exercises
+    .find((item) => item.exerciseKey === exerciseKey)!
+  mutate(exercise)
+  return copy
+}
+
 describe('3C Programming V1 audit rules', () => {
   it('accepts all 24 frozen source levels', () => {
     expect(auditTemplateSet(threeCTemplates)).toEqual([])
@@ -277,6 +359,12 @@ describe('3C Programming V1 audit rules', () => {
     )
   })
 
+  it('reports missing sets on a Strength exercise', () => {
+    expect(auditTemplateLevel(withoutStrengthSets(validLevel))).toContainEqual(
+      expect.objectContaining({ code: 'STRENGTH_SETS_REQUIRED' }),
+    )
+  })
+
   it('rejects high-risk actions only in the second L3 Circuit Block', () => {
     const mutated = withHighRiskL3CircuitAction(validLevel)
     expect(mutated.blocks[0].exercises.map((item) => item.fatigueRisk)).toEqual(
@@ -297,6 +385,53 @@ describe('3C Programming V1 audit rules', () => {
     expect(getLevel('3c3', 'l1').blocks[0].exercises.map((item) => item.exerciseKey)).not.toContain('low-box-step')
     expect(getLevel('3c3', 'l4').blocks[1].exercises.every((item) => item.prescription.sets === undefined)).toBe(true)
     expect(getLevel('3c6', 'l4').blocks.flatMap((block) => block.exercises).some((item) => /barbell|杠铃/i.test(item.displayName))).toBe(false)
+  })
+
+  it('rejects a 3C03 L1 Farmer Carry laterality mutation', () => {
+    const mutated = mutateExercise('3c3', 'l1', 0, 'bilateral-farmer-carry', (exercise) => {
+      exercise.laterality = 'unilateral'
+    })
+    expect(auditTemplateSet(mutated)).toContainEqual(expect.objectContaining({
+      code: 'SPECIAL_CASE',
+      path: expect.stringContaining('3c3/l1'),
+    }))
+  })
+
+  it('rejects 3C03 L4 Circuit prescription mutations', () => {
+    const rdlMutation = mutateExercise('3c3', 'l4', 1, 'double-dumbbell-rdl', (exercise) => {
+      exercise.prescription.reps = 20
+    })
+    const carryMutation = mutateExercise('3c3', 'l4', 1, 'suitcase-carry', (exercise) => {
+      exercise.prescription.distanceMeters = 40
+    })
+
+    expect(auditTemplateSet(rdlMutation)).toContainEqual(expect.objectContaining({
+      code: 'SPECIAL_CASE',
+      path: expect.stringContaining('3c3/l4'),
+    }))
+    expect(auditTemplateSet(carryMutation)).toContainEqual(expect.objectContaining({
+      code: 'SPECIAL_CASE',
+      path: expect.stringContaining('3c3/l4'),
+    }))
+  })
+
+  it('rejects 3C06 L4 Strength and Circuit mutations', () => {
+    const frontSquatMutation = mutateExercise('3c6', 'l4', 1, 'double-dumbbell-front-squat', (exercise) => {
+      exercise.prescription.reps = 20
+    })
+    const rowRoleMutation = mutateExercise('3c6', 'l4', 0, 'dumbbell-chest-supported-row', (exercise) => {
+      exercise.role = 'CARRY'
+    })
+    const carryLateralityMutation = mutateExercise('3c6', 'l4', 1, 'bilateral-farmer-carry', (exercise) => {
+      exercise.laterality = 'unilateral'
+    })
+
+    for (const mutated of [frontSquatMutation, rowRoleMutation, carryLateralityMutation]) {
+      expect(auditTemplateSet(mutated)).toContainEqual(expect.objectContaining({
+        code: 'SPECIAL_CASE',
+        path: expect.stringContaining('3c6/l4'),
+      }))
+    }
   })
 
   it('uses only the maximum estimate mismatch gates', () => {
