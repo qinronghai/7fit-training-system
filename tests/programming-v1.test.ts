@@ -4,6 +4,7 @@ import type {
   ExercisePrescription,
   Laterality,
   ProgramLevel,
+  SelectableExerciseSlot,
   TrainingExercise,
   ProgrammingTemplateLevel,
   TrainingBlock,
@@ -249,6 +250,23 @@ const getLevel = (templateId: string, programLevel: ProgramLevel): ProgrammingTe
 
 const validLevel = getLevel('3c1', 'l3')
 
+const selectableSlotFor3C: SelectableExerciseSlot = {
+  kind: 'selectable',
+  id: '3c-fixture-slot',
+  required: true,
+  selectCount: 1,
+  defaultOptionKey: '3c-fixture-option',
+  options: [{
+    exerciseKey: '3c-fixture-option',
+    displayName: '3C Fixture Option',
+    role: 'ACCESSORY',
+    movementPattern: 'core',
+    laterality: 'bilateral',
+    fatigueRisk: 'low',
+    prescription: { reps: 5 },
+  }],
+}
+
 const withoutPrimary = (source: ProgrammingTemplateLevel): ProgrammingTemplateLevel => ({
   ...source,
   blocks: source.blocks.map((block, blockIndex) => blockIndex === 0
@@ -380,6 +398,32 @@ describe('3C Programming V1 audit rules', () => {
   it('does not ban high-risk actions in an L1 Circuit', () => {
     expect(auditTemplateLevel(withHighRiskL1CircuitAction(getLevel('3c1', 'l1')))).not.toContainEqual(
       expect.objectContaining({ code: 'HIGH_RISK_IN_CIRCUIT' }),
+    )
+  })
+
+  it('keeps Pattern Prep strict for the Phase 1 3C audit', () => {
+    const source = getLevel('3c1', 'l1')
+    const withoutPatternPrep = {
+      ...source,
+      prep: source.prep.filter((item) => item.phase !== 'P'),
+    }
+
+    expect(auditTemplateLevel(withoutPatternPrep)).toContainEqual(
+      expect.objectContaining({ code: 'PATTERN_PREP_REQUIRED' }),
+    )
+  })
+
+  it('rejects a selectable slot in the 3C-specific audit instead of filtering it out', () => {
+    const source = getLevel('3c1', 'l3')
+    const mutated = {
+      ...source,
+      blocks: source.blocks.map((block, blockIndex) => blockIndex === 1
+        ? { ...block, exercises: [selectableSlotFor3C, ...block.exercises] }
+        : block),
+    }
+
+    expect(auditTemplateLevel(mutated)).toContainEqual(
+      expect.objectContaining({ code: 'SELECTABLE_SLOT_FORBIDDEN' }),
     )
   })
 

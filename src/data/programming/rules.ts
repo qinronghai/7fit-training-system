@@ -352,12 +352,13 @@ const validateProgressionMetadata = (
 const validatePrepAndRamp = (
   level: ProgrammingTemplateLevel,
   issues: AuditIssue[],
+  requireExplicitPatternPrep = false,
 ): void => {
   if (level.prep.length < 2 || level.prep.length > 4) {
     issues.push(issue('PREP_COUNT', 'prep', 'Prep must contain 2–4 targeted preparation items.'))
   }
   if (!level.prep.some((item) => item.phase === 'P')
-    && !level.rampUp.some((set) => set.targetRole === 'PRIMARY')) {
+    && (requireExplicitPatternPrep || !level.rampUp.some((set) => set.targetRole === 'PRIMARY'))) {
     issues.push(issue('PATTERN_PREP_REQUIRED', 'prep', 'Pattern preparation must be provided by a P Prep item or a Primary-targeted ramp-up.'))
   }
   level.prep.forEach((item, index) => {
@@ -402,6 +403,15 @@ const validateBlockStructure = (
 
   level.blocks.forEach((block, blockIndex) => {
     const path = 'blocks[' + blockIndex + ']'
+    block.exercises.forEach((entry, exerciseIndex) => {
+      if (isSelectableExerciseSlot(entry)) {
+        issues.push(issue(
+          'SELECTABLE_SLOT_FORBIDDEN',
+          path + '.exercises[' + exerciseIndex + ']',
+          '3C blocks must contain TrainingExercise entries, not selectable slots.',
+        ))
+      }
+    })
     if (block.kind === 'circuit') {
       const rounds = countRange(block.rounds)
       if (!rounds || rounds.min <= 0) {
@@ -454,6 +464,7 @@ const validateFatigueStack = (
 
 export const auditSharedTemplateLevel = (
   level: ProgrammingTemplateLevel,
+  options: { requireExplicitPatternPrep?: boolean } = {},
 ): AuditIssue[] => {
   const issues: AuditIssue[] = []
   if (!level.primaryGoal.trim()) {
@@ -473,7 +484,7 @@ export const auditSharedTemplateLevel = (
       }
     })
   })
-  validatePrepAndRamp(level, issues)
+  validatePrepAndRamp(level, issues, options.requireExplicitPatternPrep === true)
   validateFatigueStack(level, issues)
   validateProgressionMetadata(level, issues)
 
@@ -488,7 +499,7 @@ export const auditSharedTemplateLevel = (
 export const audit3CTemplateLevel = (
   level: ProgrammingTemplateLevel,
 ): AuditIssue[] => {
-  const issues = auditSharedTemplateLevel(level)
+  const issues = auditSharedTemplateLevel(level, { requireExplicitPatternPrep: true })
   validateBlockStructure(level, issues)
 
   const estimate = estimateSessionMinutes(level)
@@ -936,12 +947,14 @@ export const auditBodyTemplateLevel = (
     if (estimate.totalMinutes.max > 60) {
       issues.push(issue('TIME_OVER_BUDGET', 'scenario[' + scenarioIndex + '].estimatedMinutes', 'Calculated BODY session maximum exceeds 60 minutes.'))
     }
-    const manualMax = level.estimatedMinutes.max
-    const calculatedMax = estimate.totalMinutes.max
-    if (!Number.isFinite(manualMax)
-      || manualMax < calculatedMax
-      || manualMax - calculatedMax > 10) {
-      issues.push(issue('ESTIMATE_MISMATCH', 'estimatedMinutes.max', 'Manual maximum must cover every calculated scenario maximum and stay within a 10-minute gap.'))
+    if (scenario.includeComplementaryOption !== true) {
+      const manualMax = level.estimatedMinutes.max
+      const calculatedMax = estimate.totalMinutes.max
+      if (!Number.isFinite(manualMax)
+        || manualMax < calculatedMax
+        || manualMax - calculatedMax > 10) {
+        issues.push(issue('ESTIMATE_MISMATCH', 'estimatedMinutes.max', 'Manual maximum must cover every default calculated scenario maximum and stay within a 10-minute gap.'))
+      }
     }
   })
 
@@ -988,6 +1001,40 @@ export const auditBodyTemplateSet = (
           path: template.id + '/' + level.programLevel + '/' + levelIssue.path,
         })
       })
+
+      if (template.id === 'body5') {
+        let defaultCount: number | null = null
+        try {
+          defaultCount = resolveProgrammingLevel(level).exercises.length
+        } catch {
+          defaultCount = null
+        }
+        if (defaultCount !== 5) {
+          issues.push(issue(
+            'BODY05_EXERCISE_COUNT',
+            template.id + '/' + level.programLevel + '/exercises',
+            'BODY05 must resolve to exactly five default exercises.',
+          ))
+        }
+
+        const scenarioCounts = bodySelectionScenarios(level).map((scenario) => {
+          try {
+            return resolveProgrammingLevel(level, scenario).exercises.length
+          } catch {
+            return null
+          }
+        })
+        const maximumCount = scenarioCounts.every((count): count is number => count !== null)
+          ? Math.max(...scenarioCounts)
+          : null
+        if (maximumCount !== 6) {
+          issues.push(issue(
+            'BODY05_EXERCISE_COUNT',
+            template.id + '/' + level.programLevel + '/exercises',
+            'BODY05 must resolve to no more than six exercises, with a six-exercise complementary maximum.',
+          ))
+        }
+      }
     })
     for (let index = 1; index < levels.length; index += 1) {
       if (levels[index - 1] && levels[index] && !hasProgression(levels[index - 1], levels[index])) {
@@ -1063,15 +1110,36 @@ const MINIMUM_PLANNING_WINDOW_SECONDS: Record<ProgramLevel, number> = {
   l4: 44 * 60,
 }
 
+/**
+ * Additional coaching-window allowance for a full, strength-only BODY
+ * session. The measurable work estimator intentionally remains structural;
+ * this supplement represents conservative setup, instruction, demonstration,
+ * and coaching time that is not encoded on individual prescriptions.
+ */
+const STRENGTH_ONLY_PLANNING_SUPPLEMENT_SECONDS: Record<ProgramLevel, number> = {
+  l1: 10 * 60,
+  l2: 9 * 60,
+  l3: 6 * 60,
+  l4: 6 * 60,
+}
+
 export const calculatePlanningFloorSeconds = (
   level: ResolvableProgrammingLevel,
   selection?: ProgrammingSelection,
 ): number => {
   const resolved = resolvedLevelFor(level, selection)
-  return MINIMUM_PLANNING_WINDOW_SECONDS[resolved.programLevel]
-  + resolved.blocks
+  const strengthOnlySupplement = resolved.blocks.length === 1
+    && resolved.blocks[0]?.kind === 'strength'
+    && getTrainingExercises(resolved.blocks[0]).length >= 5
+    ? STRENGTH_ONLY_PLANNING_SUPPLEMENT_SECONDS[resolved.programLevel]
+    : 0
+  const circuitSupplement = resolved.blocks
     .filter((block) => block.kind === 'circuit')
     .reduce((total, block) => total + getTrainingExercises(block).length * 2 * 60, 0)
+
+  return MINIMUM_PLANNING_WINDOW_SECONDS[resolved.programLevel]
+    + strengthOnlySupplement
+    + circuitSupplement
 }
 
 const exerciseSets = (exercise: TrainingExercise): NumericRange => toRange(exercise.prescription.sets, 1)
