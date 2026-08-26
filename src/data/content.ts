@@ -60,6 +60,7 @@ import type {
   TrainingBlock,
   TrainingExercise,
 } from './programming/types'
+import { getTrainingExercises } from './programming/types'
 
 type MigratedTemplateLevel = {
   warmup: readonly { name: string; tag: string; prescription: string }[]
@@ -270,11 +271,11 @@ const toLegacyProgrammingMetrics = (
 ): TemplateLevel['metrics'] => {
   const circuit = source.blocks.find((block) => block.kind === 'circuit')
   const primary = source.blocks
-    .flatMap((block) => block.exercises)
+    .flatMap(getTrainingExercises)
     .find((item) => item.role === 'PRIMARY')
   const rounds = circuit?.rounds === undefined
     ? source.blocks
-      .flatMap((block) => block.exercises)
+      .flatMap(getTrainingExercises)
       .reduce((total, item) => total + (typeof item.prescription.sets === 'number' ? item.prescription.sets : 0), 0) + ' 组'
     : formatCount(circuit.rounds, ' 轮')
   const intensity = primary?.prescription.rpe !== undefined
@@ -312,7 +313,7 @@ const toLegacyProgrammingLevel = (
       ...source.rampUp.map(toLegacyProgrammingRampUp),
     ],
     exercises: source.blocks.flatMap((block) => (
-      block.exercises.map((item) => toLegacyProgrammingExercise(item, block))
+      getTrainingExercises(block).map((item) => toLegacyProgrammingExercise(item, block))
     )),
     metrics,
     sectionTitle: source.blocks.map((block) => block.label).join(' + '),

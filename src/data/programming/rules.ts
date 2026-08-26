@@ -11,6 +11,7 @@ import type {
   TrainingBlock,
   TrainingExercise,
 } from './types'
+import { getTrainingExercises } from './types'
 
 const DEFAULT_SECONDS_PER_REP = 4
 const DEFAULT_SECONDS_PER_METER = 1
@@ -105,7 +106,7 @@ const generatedExerciseKey = (exerciseKey: string): boolean => (
 )
 
 const allExercises = (level: ProgrammingTemplateLevel): TrainingExercise[] => (
-  level.blocks.flatMap((block) => block.exercises)
+  level.blocks.flatMap(getTrainingExercises)
 )
 
 const countValue = (value: Count | undefined, fallback = 0): number => {
@@ -240,7 +241,7 @@ const validateBlockStructure = (
       if (!rounds || rounds.min <= 0) {
         issues.push(issue('CIRCUIT_ROUNDS', path + '.rounds', 'Circuit Block must define positive rounds.'))
       }
-      block.exercises.forEach((exercise, exerciseIndex) => {
+      getTrainingExercises(block).forEach((exercise, exerciseIndex) => {
         const exercisePath = path + '.exercises[' + exerciseIndex + ']'
         if (exercise.prescription.sets !== undefined) {
           issues.push(issue('CIRCUIT_SETS_FORBIDDEN', exercisePath + '.prescription.sets', 'Circuit work is expressed per round, not action-level sets.'))
@@ -254,7 +255,7 @@ const validateBlockStructure = (
       if (block.rounds !== undefined) {
         issues.push(issue('BLOCK_ORDER', path + '.rounds', 'Strength Block cannot use circuit rounds.'))
       }
-      block.exercises.forEach((exercise, exerciseIndex) => {
+      getTrainingExercises(block).forEach((exercise, exerciseIndex) => {
         if (countRange(exercise.prescription.sets) === null) {
           issues.push(issue('STRENGTH_SETS_REQUIRED', path + '.exercises[' + exerciseIndex + '].prescription.sets', 'Strength actions must define sets.'))
         }
@@ -268,9 +269,10 @@ const validateFatigueStack = (
   issues: AuditIssue[],
 ): void => {
   level.blocks.forEach((block, blockIndex) => {
-    for (let index = 1; index < block.exercises.length; index += 1) {
-      const previous = block.exercises[index - 1]
-      const current = block.exercises[index]
+    const exercises = getTrainingExercises(block)
+    for (let index = 1; index < exercises.length; index += 1) {
+      const previous = exercises[index - 1]
+      const current = exercises[index]
       if (previous.fatigueRisk === 'high'
         && current.fatigueRisk === 'high'
         && previous.movementPattern === current.movementPattern) {
@@ -371,7 +373,9 @@ const matchesExerciseBlock = (
   blockIndex: number,
   expected: readonly ExerciseExpectation[],
 ): boolean => {
-  const actual = level.blocks[blockIndex]?.exercises
+  const actual = level.blocks[blockIndex]
+    ? getTrainingExercises(level.blocks[blockIndex])
+    : undefined
   return Boolean(
     actual
     && actual.length === expected.length
@@ -433,7 +437,7 @@ const validateSpecialCases = (
     if (!matchesExerciseBlock(l1, 0, expectedL1Exercises)) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l1', '3C03 L1 must use one supported split squat plus row, chest press, bilateral Farmer Carry and dead bug.'))
     }
-    if (l1.blocks[0]?.exercises.filter((exercise) => exercise.movementPattern === 'single').length !== 1) {
+    if (l1.blocks[0] && getTrainingExercises(l1.blocks[0]).filter((exercise) => exercise.movementPattern === 'single').length !== 1) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l1', '3C03 L1 may contain only one knee-dominant single-leg action.'))
     }
 
@@ -478,7 +482,7 @@ const validateSpecialCases = (
       || l4Rounds?.min !== 2
       || l4Rounds?.max !== 3
       || !sameCount(l4Circuit?.restBetweenRoundsSeconds, 90)
-      || (l4Circuit?.exercises ?? []).some((exercise) => exercise.prescription.sets !== undefined)) {
+      || (l4Circuit ? getTrainingExercises(l4Circuit).some((exercise) => exercise.prescription.sets !== undefined) : false)) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l4', '3C03 L4 must use the frozen Strength plus three-action Circuit prescription.'))
     }
   }
@@ -522,7 +526,7 @@ const validateSpecialCases = (
         prescription: { distanceMeters: { min: 20, max: 30 } },
       },
     ]
-    const primaryAlternative = l4.blocks[0]?.exercises[0]?.alternatives?.[0]
+    const primaryAlternative = l4.blocks[0] ? getTrainingExercises(l4.blocks[0])[0]?.alternatives?.[0] : undefined
     const alternativeValid = primaryAlternative?.exerciseKey === 'double-kettlebell-rdl'
       && primaryAlternative.reason === 'equipment'
       && primaryAlternative.preserves.primaryGoal === true
@@ -697,7 +701,7 @@ const estimateStrength = (block: TrainingBlock) => {
   const rest: NumericRange[] = []
   const unilateralAdjustment: NumericRange[] = []
 
-  for (const exercise of block.exercises) {
+  for (const exercise of getTrainingExercises(block)) {
     const sets = exerciseSets(exercise)
     const work = workRange(exercise.prescription, exercise.laterality)
     execution.push(multiplyRange(work.base, sets))
@@ -722,11 +726,12 @@ const estimateStrength = (block: TrainingBlock) => {
 
 const estimateCircuit = (block: TrainingBlock) => {
   const rounds = toRange(block.rounds, 1)
-  const work = block.exercises.map((exercise) => workRange(exercise.prescription, exercise.laterality))
+  const exercises = getTrainingExercises(block)
+  const work = exercises.map((exercise) => workRange(exercise.prescription, exercise.laterality))
   const basePerRound = sumRanges(work.map((item) => item.base))
   const unilateralPerRound = sumRanges(work.map((item) => item.unilateralAdjustment))
   const transitionSeconds = toRange(block.transitionSeconds, DEFAULT_STATION_TRANSITION_SECONDS)
-  const stationCount = Math.max(0, block.exercises.length - 1)
+  const stationCount = Math.max(0, exercises.length - 1)
   const stationTransitions = multiplyRange(
     transitionSeconds,
     {
