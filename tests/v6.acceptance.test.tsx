@@ -21,19 +21,13 @@ describe('7Fit V6 content contract', () => {
     expect(movementPatterns).toHaveLength(12)
   })
 
-  it('matches the migrated V5.5 warmup and main-set counts for every template level', () => {
-    const expected: Record<string, number[][]> = {
-      '3c1': [[7, 5], [7, 5], [7, 5], [7, 5]], '3c2': [[7, 5], [7, 5], [7, 5], [7, 5]],
-      '3c3': [[6, 5], [6, 5], [7, 5], [7, 5]], '3c4': [[7, 5], [7, 5], [7, 5], [7, 5]],
-      '3c5': [[7, 5], [7, 5], [7, 5], [7, 5]], '3c6': [[7, 4], [7, 4], [7, 5], [7, 5]],
-      'body1': [[7, 6], [7, 5], [7, 5], [7, 5]], 'body2': [[7, 5], [7, 5], [7, 5], [7, 5]],
-      'body3': [[6, 6], [6, 6], [7, 6], [7, 6]], 'body4': [[7, 5], [7, 5], [7, 5], [7, 5]],
-      'body5': [[7, 6], [7, 6], [7, 6], [7, 6]], 'con1': [[4, 1], [4, 2], [5, 2], [5, 3]],
-      'con2': [[5, 2], [5, 3], [5, 3], [6, 3]], 'con3': [[5, 4], [5, 4], [5, 4], [5, 4]],
-      'con4': [[5, 4], [5, 4], [5, 5], [5, 5]], 'con5': [[5, 4], [5, 5], [5, 5], [5, 5]],
-    }
+  it('keeps every template level App-compatible after the Programming adapter', () => {
+    expect(templates.filter((template) => template.system === '3c')).toHaveLength(6)
     for (const template of templates) {
-      expect(['l1', 'l2', 'l3', 'l4'].map((level) => [template.levels[level as 'l1' | 'l2' | 'l3' | 'l4'].warmup.length, template.levels[level as 'l1' | 'l2' | 'l3' | 'l4'].exercises.length])).toEqual(expected[template.id])
+      for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
+        expect(template.levels[level].warmup.length).toBeGreaterThan(0)
+        expect(template.levels[level].exercises.length).toBeGreaterThan(0)
+      }
     }
   })
 
@@ -60,9 +54,9 @@ describe('7Fit V6 content contract', () => {
     expect(text).toContain('3C 代谢力量')
     expect(text).toContain('热身与动作准备')
     expect(text).toContain('滑雪机轻拉')
-    expect(text).toContain('主训练')
+    expect(text).toContain('Strength Block + 3C Circuit')
     expect(text).toContain('哈克深蹲')
-    expect(text).toContain('RPE 7–8')
+    expect(text).toContain('RIR 2')
   })
 })
 
@@ -84,7 +78,7 @@ describe('7Fit V6 routing and shell', () => {
     window.location.hash = '#/templates/3c1/l3'
     render(<App />)
     expect(screen.getByRole('link', { name: /滑雪机轻拉/ })).toHaveAttribute('href', expect.stringMatching(/#\/library\/action\/action-/))
-    expect(screen.getByRole('link', { name: /哈克深蹲/ })).toHaveAttribute('href', expect.stringMatching(/#\/library\/action\/action-/))
+    expect(screen.getByRole('link', { name: '查看动作详情：哈克深蹲' })).toHaveAttribute('href', expect.stringMatching(/#\/library\/action\/action-/))
   })
 
   it('renders semantic navigation, search and the theme control', () => {

@@ -51,6 +51,15 @@ import { legacyTemplateContentPart1 } from './legacyTemplateContentPart1'
 import { legacyTemplateContentPart2 } from './legacyTemplateContentPart2'
 import { legacyTemplateContentPart3 } from './legacyTemplateContentPart3'
 import { legacyTemplateContentPart4 } from './legacyTemplateContentPart4'
+import { threeCTemplates } from './programming/threeCTemplates'
+import type {
+  Count,
+  ExercisePrescription,
+  Laterality,
+  ProgrammingTemplateLevel,
+  TrainingBlock,
+  TrainingExercise,
+} from './programming/types'
 
 type MigratedTemplateLevel = {
   warmup: readonly { name: string; tag: string; prescription: string }[]
@@ -61,12 +70,16 @@ type MigratedTemplateLevel = {
   coachNote: string
 }
 
-const legacyTemplateContent = {
+const allLegacyTemplateContent = {
   ...legacyTemplateContentPart1,
   ...legacyTemplateContentPart2,
   ...legacyTemplateContentPart3,
   ...legacyTemplateContentPart4,
 } as Record<string, Record<'l1' | 'l2' | 'l3' | 'l4', MigratedTemplateLevel>>
+
+const legacyTemplateContent = Object.fromEntries(
+  Object.entries(allLegacyTemplateContent).filter(([id]) => !id.startsWith('3c')),
+) as Record<string, Record<'l1' | 'l2' | 'l3' | 'l4', MigratedTemplateLevel>>
 
 const ppSeeds: Array<[string, string, string, string, string[], string[], string[], [string, string]]> = [
   ['PP01', '髋主导蹲', 'L1 → L2', '髋模式', ['squat'], ['髋屈髋伸与核心协同'], ['建立髋主导下肢基础蹲型。'], ['https://www.youtube.com/watch?v=1dpapTXF4Qs', 'https://www.youtube.com/watch?v=Z50B4zzadvw']],
@@ -161,6 +174,154 @@ const toTemplateLevel = (source: MigratedTemplateLevel, levelIndex: number): Tem
   }
 }
 
+const programmingPrepTags: Record<ProgrammingTemplateLevel['prep'][number]['phase'], string> = {
+  R: 'Raise',
+  M: 'Mobilize',
+  A: 'Activate',
+  P: 'Pattern',
+}
+
+const formatCount = (value: Count | undefined, unit = ''): string => {
+  if (value === undefined) return ''
+  if (typeof value === 'number') return String(value) + unit
+  const text = value.min === value.max
+    ? String(value.min)
+    : String(value.min) + '–' + String(value.max)
+  return text + unit
+}
+
+const formatPrescription = (
+  prescription: ExercisePrescription,
+  laterality?: Laterality,
+  restSeconds?: Count,
+): string => {
+  const parts: string[] = []
+  const sideSuffix = laterality === 'unilateral' ? ' / 侧' : ''
+  if (prescription.sets !== undefined && prescription.reps !== undefined) {
+    parts.push(formatCount(prescription.sets) + ' × ' + formatCount(prescription.reps, ' 次') + sideSuffix)
+  } else if (prescription.reps !== undefined) {
+    parts.push(formatCount(prescription.reps, ' 次') + sideSuffix)
+  }
+  if (prescription.durationSeconds !== undefined) {
+    parts.push(formatCount(prescription.durationSeconds, ' 秒') + sideSuffix)
+  }
+  if (prescription.distanceMeters !== undefined) {
+    parts.push(formatCount(prescription.distanceMeters, ' 米') + sideSuffix)
+  }
+  if (prescription.rpe !== undefined) parts.push('RPE ' + formatCount(prescription.rpe))
+  if (prescription.rir !== undefined) parts.push('RIR ' + formatCount(prescription.rir))
+  if (restSeconds !== undefined) parts.push('休息 ' + formatCount(restSeconds, ' 秒'))
+  return parts.join(' · ') || '按教练指导'
+}
+
+const programmingPatternLabels: Record<TrainingExercise['movementPattern'], string> = {
+  squat: '下肢 · 蹲',
+  hinge: '后链 · 髋铰链',
+  hip: '臀部 · 髋伸展',
+  single: '下肢 · 单腿',
+  adduction: '髋内收 · 稳定',
+  hpush: '胸部 · 水平推',
+  vpush: '肩部 · 垂直推',
+  hpull: '背部 · 水平拉',
+  vpull: '背部 · 垂直拉',
+  core: '核心 · 稳定',
+  carry: '全身 · Carry',
+  rotation: '核心 · 抗旋转',
+}
+
+const toLegacyProgrammingPrep = (
+  item: ProgrammingTemplateLevel['prep'][number],
+): TemplateLevel['warmup'][number] => ({
+  name: item.displayName,
+  tag: programmingPrepTags[item.phase],
+  prescription: formatPrescription(item.prescription, item.laterality),
+})
+
+const toLegacyProgrammingRampUp = (
+  item: ProgrammingTemplateLevel['rampUp'][number],
+): TemplateLevel['warmup'][number] => ({
+  name: item.displayName,
+  tag: 'Specific Ramp-up',
+  prescription: [
+    '第 ' + String(item.order) + ' 组',
+    formatCount(item.reps, ' 次') + (item.laterality === 'unilateral' ? ' / 侧' : ''),
+    item.loadGuidance,
+    item.restSeconds === undefined ? '' : '休息 ' + formatCount(item.restSeconds, ' 秒'),
+  ].filter(Boolean).join(' · '),
+})
+
+const toLegacyProgrammingExercise = (
+  item: TrainingExercise,
+  block: TrainingBlock,
+): TemplateLevel['exercises'][number] => ({
+  name: item.displayName,
+  pattern: programmingPatternLabels[item.movementPattern],
+  prescription: formatPrescription(
+    item.prescription,
+    item.laterality,
+    block.kind === 'strength'
+      ? item.restSeconds ?? block.restBetweenSetsSeconds
+      : undefined,
+  ),
+})
+
+const toLegacyProgrammingMetrics = (
+  source: ProgrammingTemplateLevel,
+): TemplateLevel['metrics'] => {
+  const circuit = source.blocks.find((block) => block.kind === 'circuit')
+  const primary = source.blocks
+    .flatMap((block) => block.exercises)
+    .find((item) => item.role === 'PRIMARY')
+  const rounds = circuit?.rounds === undefined
+    ? source.blocks
+      .flatMap((block) => block.exercises)
+      .reduce((total, item) => total + (typeof item.prescription.sets === 'number' ? item.prescription.sets : 0), 0) + ' 组'
+    : formatCount(circuit.rounds, ' 轮')
+  const intensity = primary?.prescription.rpe !== undefined
+    ? 'RPE ' + formatCount(primary.prescription.rpe)
+    : primary?.prescription.rir !== undefined
+      ? 'RIR ' + formatCount(primary.prescription.rir)
+      : '按动作处方'
+  const rest = circuit?.restBetweenRoundsSeconds !== undefined
+    ? '轮间 ' + formatCount(circuit.restBetweenRoundsSeconds, ' 秒')
+    : source.blocks[0]?.restBetweenSetsSeconds === undefined
+      ? '按动作处方'
+      : formatCount(source.blocks[0].restBetweenSetsSeconds, ' 秒')
+
+  return [
+    { label: '轮数', value: rounds },
+    { label: '主观强度', value: intensity },
+    { label: '休息', value: rest },
+  ]
+}
+
+const toLegacyProgrammingParameter = (
+  metrics: TemplateLevel['metrics'],
+): string => metrics.map((metric) => metric.label + ' ' + metric.value).join(' · ')
+
+const toLegacyProgrammingLevel = (
+  source: ProgrammingTemplateLevel,
+  levelIndex: number,
+): TemplateLevel => {
+  const metrics = toLegacyProgrammingMetrics(source)
+  return {
+    label: 'L' + String(levelIndex + 1),
+    focus: levelNames[levelIndex],
+    warmup: [
+      ...source.prep.map(toLegacyProgrammingPrep),
+      ...source.rampUp.map(toLegacyProgrammingRampUp),
+    ],
+    exercises: source.blocks.flatMap((block) => (
+      block.exercises.map((item) => toLegacyProgrammingExercise(item, block))
+    )),
+    metrics,
+    sectionTitle: source.blocks.map((block) => block.label).join(' + '),
+    sectionCount: String(source.blocks.reduce((count, block) => count + block.exercises.length, 0)) + '个动作',
+    coachNote: source.coachNote,
+    parameter: toLegacyProgrammingParameter(metrics),
+  }
+}
+
 const templateSeeds: Array<[string, string, Template['system'], string, string]> = [
   ['3c1', '3C · 1', '3c', '臀腿 + 上肢拉 + 核心', '下肢 / 拉 / 核心交替，提高密度但保留动作质量'],
   ['3c2', '3C · 2', '3c', '臀腿 + 上肢推 + 核心', '下肢与推类交替，控制肩部与核心疲劳'],
@@ -180,15 +341,31 @@ const templateSeeds: Array<[string, string, Template['system'], string, string]>
   ['con5', 'CON · 5', 'conditioning', '混合体能', '器械 + 雪橇 + 自由重量 + Carry 综合体能'],
 ]
 
-export const templates: Template[] = templateSeeds.map(([id, code, system, name, description]) => ({
-  id, code, system, name, description,
-  levels: {
-    l1: toTemplateLevel(legacyTemplateContent[id].l1, 0),
-    l2: toTemplateLevel(legacyTemplateContent[id].l2, 1),
-    l3: toTemplateLevel(legacyTemplateContent[id].l3, 2),
-    l4: toTemplateLevel(legacyTemplateContent[id].l4, 3),
-  },
-}))
+const programmingTemplateById = new Map(threeCTemplates.map((template) => [template.id, template]))
+
+export const templates: Template[] = templateSeeds.map(([id, code, system, name, description]) => {
+  const programmingTemplate = system === '3c' ? programmingTemplateById.get(id) : undefined
+  return {
+    id,
+    code,
+    system,
+    name,
+    description,
+    levels: programmingTemplate
+      ? {
+        l1: toLegacyProgrammingLevel(programmingTemplate.levels.l1, 0),
+        l2: toLegacyProgrammingLevel(programmingTemplate.levels.l2, 1),
+        l3: toLegacyProgrammingLevel(programmingTemplate.levels.l3, 2),
+        l4: toLegacyProgrammingLevel(programmingTemplate.levels.l4, 3),
+      }
+      : {
+        l1: toTemplateLevel(legacyTemplateContent[id].l1, 0),
+        l2: toTemplateLevel(legacyTemplateContent[id].l2, 1),
+        l3: toTemplateLevel(legacyTemplateContent[id].l3, 2),
+        l4: toTemplateLevel(legacyTemplateContent[id].l4, 3),
+      },
+  }
+})
 
 export type LibraryActionSource = {
   templateId: string
