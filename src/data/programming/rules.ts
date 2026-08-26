@@ -5,13 +5,17 @@ import type {
  Laterality,
  NumericRange,
   ProgramLevel,
-  ProgrammingTemplate,
+  ProgrammingSelection,
+ ProgrammingTemplate,
  ProgrammingTemplateLevel,
+  ResolvedProgrammingLevel,
+  SelectableExerciseSlot,
   SessionTimeEstimate,
   TrainingBlock,
   TrainingExercise,
 } from './types'
 import { getTrainingExercises } from './types'
+import { isSelectableExerciseSlot } from './types'
 
 const DEFAULT_SECONDS_PER_REP = 4
 const DEFAULT_SECONDS_PER_METER = 1
@@ -109,6 +113,84 @@ const allExercises = (level: ProgrammingTemplateLevel): TrainingExercise[] => (
   level.blocks.flatMap(getTrainingExercises)
 )
 
+type ResolvedSlot = {
+  exercises: TrainingExercise[]
+  selectedKey: string
+  complementaryIncluded: boolean
+}
+
+const resolveSelectableSlot = (
+  slot: SelectableExerciseSlot,
+  selection: ProgrammingSelection,
+  path: string,
+): ResolvedSlot => {
+  const explicitKey = selection.selectable?.[slot.id]
+  const selectedKey = explicitKey ?? slot.defaultOptionKey
+  const selected = slot.options.find((option) => option.exerciseKey === selectedKey)
+
+  if (!selected) {
+    throw new Error(`${path}: selectable option "${selectedKey}" is not approved for this slot`)
+  }
+
+  const exercises: TrainingExercise[] = [{ ...selected }]
+  let complementaryIncluded = false
+  if (selection.includeComplementaryOption === true) {
+    if (slot.allowComplementaryOption !== true) {
+      throw new Error(`${path}: complementary option is not allowed`)
+    }
+    const complementary = slot.options.find((option) => option.exerciseKey !== selected.exerciseKey)
+    if (!complementary) {
+      throw new Error(`${path}: complementary option is not uniquely defined`)
+    }
+    exercises.push({
+      ...complementary,
+      optional: true,
+      ...(slot.complementaryCondition ? { optionalCondition: slot.complementaryCondition } : {}),
+    })
+    complementaryIncluded = true
+  }
+
+  return { exercises, selectedKey, complementaryIncluded }
+}
+
+export const resolveProgrammingLevel = (
+  level: ProgrammingTemplateLevel,
+  selection: ProgrammingSelection = {},
+): ResolvedProgrammingLevel => {
+  const selections: Record<string, string> = {}
+  let optionalIncluded = false
+  let complementaryIncluded = false
+  const blocks = level.blocks.map((block, blockIndex) => {
+    const exercises: TrainingExercise[] = []
+    block.exercises.forEach((entry, entryIndex) => {
+      if (isSelectableExerciseSlot(entry)) {
+        const resolvedSlot = resolveSelectableSlot(
+          entry,
+          selection,
+          `blocks[${blockIndex}].exercises[${entryIndex}]`,
+        )
+        selections[entry.id] = resolvedSlot.selectedKey
+        exercises.push(...resolvedSlot.exercises)
+        complementaryIncluded = complementaryIncluded || resolvedSlot.complementaryIncluded
+        return
+      }
+      if (entry.optional === true && selection.includeOptional !== true) return
+      if (entry.optional === true) optionalIncluded = true
+      exercises.push({ ...entry })
+    })
+    return { ...block, exercises }
+  })
+
+  return {
+    ...level,
+    blocks,
+    exercises: blocks.flatMap((block) => block.exercises),
+    selections,
+    optionalIncluded,
+    complementaryIncluded,
+  }
+}
+
 const countValue = (value: Count | undefined, fallback = 0): number => {
   if (value === undefined) return fallback
   return typeof value === 'number' ? value : (value.min + value.max) / 2
@@ -172,7 +254,7 @@ const validateExercise = (
     if (!alternative.displayName.trim() || forbiddenCompoundName(alternative.displayName)) {
       issues.push(issue('ALTERNATIVE_INVALID', alternativePath + '.displayName', 'Alternative must describe one independent Exercise.'))
     }
-    if (!['equipment', 'member-fit', 'regression', 'coach-choice'].includes(alternative.reason)) {
+    if (!['equipment', 'member-fit', 'regression', 'coach-choice', 'skill-track'].includes(alternative.reason)) {
       issues.push(issue('ALTERNATIVE_INVALID', alternativePath + '.reason', 'Alternative reason is required.'))
     }
     const preserves = alternative.preserves
@@ -180,6 +262,49 @@ const validateExercise = (
       || typeof preserves.movementPattern !== 'boolean'
       || typeof preserves.stimulus !== 'boolean') {
       issues.push(issue('ALTERNATIVE_INVALID', alternativePath + '.preserves', 'Alternative preservation flags are required.'))
+    }
+  }
+}
+
+const validateSelectableSlot = (
+  slot: SelectableExerciseSlot,
+  path: string,
+  issues: AuditIssue[],
+): void => {
+  if (!slot.id.trim()) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.id', 'Selectable slot must have a stable id.'))
+  }
+  if (slot.required !== true || slot.selectCount !== 1) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path, 'Selectable slots must require exactly one selection.'))
+  }
+  if (slot.options.length < 1) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.options', 'Selectable slots must define at least one approved option.'))
+    return
+  }
+
+  const optionKeys = slot.options.map((option) => option.exerciseKey)
+  if (new Set(optionKeys).size !== optionKeys.length) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.options', 'Selectable option exercise keys must be unique.'))
+  }
+  if (!slot.options.some((option) => option.exerciseKey === slot.defaultOptionKey)) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.defaultOptionKey', 'Default selectable option must belong to the approved option set.'))
+  }
+  slot.options.forEach((option, optionIndex) => {
+    validateExercise(option, path + '.options[' + optionIndex + ']', issues)
+    if (option.role !== 'ACCESSORY') {
+      issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.options[' + optionIndex + '].role', 'Selectable options must resolve as ACCESSORY exercises.'))
+    }
+  })
+
+  if (slot.allowComplementaryOption === true) {
+    if (slot.options.length !== 2) {
+      issues.push(issue('COMPLEMENTARY_SLOT_INVALID', path + '.options', 'Complementary slots must define exactly two approved options.'))
+    }
+    if (new Set(optionKeys).size !== 2) {
+      issues.push(issue('COMPLEMENTARY_SLOT_INVALID', path + '.options', 'Complementary slot options must have unique exercise keys.'))
+    }
+    if (slot.options.some((option) => option.role !== 'ACCESSORY')) {
+      issues.push(issue('COMPLEMENTARY_SLOT_INVALID', path + '.options', 'Both complementary options must use role ACCESSORY.'))
     }
   }
 }
@@ -300,6 +425,13 @@ export const auditTemplateLevel = (
     issues.push(issue('PRIMARY_COUNT', 'blocks', 'Every level must contain exactly one PRIMARY exercise.'))
   }
   formalExercises.forEach((exercise, index) => validateExercise(exercise, 'exercise[' + index + ']', issues))
+  level.blocks.forEach((block, blockIndex) => {
+    block.exercises.forEach((entry, entryIndex) => {
+      if (isSelectableExerciseSlot(entry)) {
+        validateSelectableSlot(entry, 'blocks[' + blockIndex + '].exercises[' + entryIndex + ']', issues)
+      }
+    })
+  })
   validatePrepAndRamp(level, issues)
   validateBlockStructure(level, issues)
   validateFatigueStack(level, issues)
