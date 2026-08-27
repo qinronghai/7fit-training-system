@@ -9,6 +9,7 @@ import {
   type ConditioningRoundPolicy,
   type ExercisePrescription,
   type Laterality,
+  type NumericRange,
   type PowerTrackSlot,
   type PowerTrackOption,
   type PrepItem,
@@ -23,6 +24,7 @@ import {
 } from '../src/data/programming/types'
 import {
   auditConditioningTemplateLevel,
+  auditConditioningTemplateSet,
   auditProgrammingTemplateSet,
   resolveProgrammingLevel,
 } from '../src/data/programming/rules'
@@ -221,6 +223,140 @@ const conditioningTemplateFixture: ProgrammingTemplate = {
   },
 }
 
+const makeAuditPrep = (
+  exerciseKey: string,
+  phase: PrepItem['phase'],
+): PrepItem => ({
+  exerciseKey,
+  displayName: exerciseKey,
+  phase,
+  prescription: { durationSeconds: 45 },
+  planningExecutionSeconds: { min: 45, max: 60 },
+  reason: 'conditioning audit fixture',
+})
+
+const makeAuditSpecificBuildUp = (
+  exerciseKey = 'row-erg',
+): SpecificBuildUpItem => ({
+  id: 'audit-build-up',
+  order: 1,
+  exerciseKey,
+  displayName: exerciseKey,
+  prescription: { durationSeconds: 20 },
+  planningExecutionSeconds: { min: 20, max: 25 },
+})
+
+const makeAuditPowerPath = (
+  prefix: string,
+  exerciseKey: string,
+): ConditioningPowerPath => ({
+  prep: [
+    makeAuditPrep(prefix + '-r', 'R'),
+    makeAuditPrep(prefix + '-m', 'M'),
+    makeAuditPrep(prefix + '-a', 'A'),
+    makeAuditPrep(prefix + '-p', 'P'),
+  ],
+  specificBuildUp: [makeAuditSpecificBuildUp(prefix + '-build')],
+  powerExercise: {
+    ...powerExercise,
+    exerciseKey,
+    displayName: exerciseKey,
+    planningExecutionSeconds: { min: 20, max: 25 },
+    prescription: { sets: 3, reps: 5 },
+  },
+})
+
+const makeAuditConditioningStation = (
+  exerciseKey: string,
+  role: TrainingExercise['role'],
+  prescription: ExercisePrescription,
+  planningExecutionSeconds: NumericRange = { min: 20, max: 30 },
+): TrainingExercise => ({
+  exerciseKey,
+  displayName: exerciseKey,
+  role,
+  movementPattern: role === 'CARRY' ? 'carry' : 'hpull',
+  laterality: 'bilateral',
+  fatigueRisk: 'moderate',
+  prescription,
+  planningExecutionSeconds,
+})
+
+const makeAuditConditioningLevel = (): ProgrammingTemplateLevel => ({
+  programLevel: 'l3',
+  primaryGoal: 'repeatable output',
+  prep: [
+    makeAuditPrep('row-erg', 'R'),
+    makeAuditPrep('ankle-dorsiflexion-rock', 'M'),
+    makeAuditPrep('glute-bridge', 'A'),
+    makeAuditPrep('row-erg-technique', 'P'),
+  ],
+  rampUp: [],
+  specificBuildUp: [makeAuditSpecificBuildUp()],
+  blocks: [{
+    id: 'conditioning-main',
+    kind: 'conditioning',
+    label: 'Conditioning',
+    rounds: 3,
+    restBetweenRoundsSeconds: 60,
+    transitionSeconds: 20,
+    transitionBetweenRoundsSeconds: 15,
+    exercises: [
+      makeAuditConditioningStation('row-erg', 'CONDITIONING', { distanceMeters: 100 }),
+      makeAuditConditioningStation('farmer-carry', 'CARRY', { distanceMeters: 20 }),
+    ],
+  }],
+  estimatedMinutes: { min: 20, max: 30 },
+  conditioningIntensityTarget: {
+    rpe: { min: 6, max: 7 },
+    note: 'Repeat output without local failure.',
+  },
+  outputPlan: outputPlan,
+  planningTime,
+  progressionFromPrevious: {
+    variables: ['volume', 'output'],
+    note: 'Increase repeatable output while preserving recovery.',
+  },
+  coachNote: 'conditioning audit fixture',
+})
+
+const makeAuditPowerTrackLevel = (): ProgrammingTemplateLevel => {
+  const level = makeAuditConditioningLevel()
+  const path = makeAuditPowerPath('audit-medicine-ball', 'medicine-ball-slam')
+  const powerSlot: PowerTrackSlot = {
+    kind: 'power-track',
+    id: 'con03-power',
+    exerciseKey: 'con03-power-slot',
+    displayName: 'Power Track',
+    role: 'POWER',
+    movementPattern: 'hinge',
+    laterality: 'bilateral',
+    fatigueRisk: 'low',
+    prescription: {},
+    options: [{
+      optionKey: 'medicine-ball-slam',
+      trackKey: 'medicine-ball',
+      path,
+      requiresTechniqueCompetency: false,
+    }],
+    defaultSelection: 'medicine-ball-slam',
+    foundationRegression: path,
+  }
+  return {
+    ...level,
+    prep: path.prep,
+    specificBuildUp: path.specificBuildUp,
+    blocks: [{
+      id: 'power',
+      kind: 'power',
+      label: 'Power',
+      restBetweenSetsSeconds: 60,
+      transitionAfterSeconds: 30,
+      exercises: [powerSlot],
+    }, ...level.blocks],
+  }
+}
+
 describe('conditioning Programming type contract', () => {
   it('accepts the conditioning system and conditioning block kind', () => {
     const system: TrainingSystem = 'conditioning'
@@ -320,6 +456,235 @@ describe('conditioning audit separation', () => {
     expect(auditProgrammingTemplateSet([conditioningTemplateFixture])).not.toContainEqual(
       expect.objectContaining({ code: 'SYSTEM_INVALID' }),
     )
+  })
+
+  it('enforces the con1 through con5 template set boundary', () => {
+    expect(auditConditioningTemplateSet([conditioningTemplateFixture])).toContainEqual(
+      expect.objectContaining({ code: 'TEMPLATE_SET' }),
+    )
+  })
+})
+
+describe('conditioning structural audit', () => {
+  it('accepts a complete conditioning level without requiring a PRIMARY exercise', () => {
+    expect(auditConditioningTemplateLevel(makeAuditConditioningLevel())).toEqual([])
+  })
+
+  it('requires exactly four ordered R/M/A/P PrepItems', () => {
+    const tooShort = makeAuditConditioningLevel()
+    tooShort.prep = tooShort.prep.slice(0, 3)
+    expect(auditConditioningTemplateLevel(tooShort)).toContainEqual(
+      expect.objectContaining({ code: 'CON_PREP_COUNT' }),
+    )
+
+    const wrongPhase = makeAuditConditioningLevel()
+    wrongPhase.prep[3] = { ...wrongPhase.prep[3], phase: 'R' }
+    expect(auditConditioningTemplateLevel(wrongPhase)).toContainEqual(
+      expect.objectContaining({ code: 'CON_PREP_PHASES' }),
+    )
+  })
+
+  it('requires one canonical Prep identity and an explicit planning prescription', () => {
+    const compound = makeAuditConditioningLevel()
+    compound.prep[0] = { ...compound.prep[0], displayName: 'RowErg / SkiErg' }
+    expect(auditConditioningTemplateLevel(compound)).toContainEqual(
+      expect.objectContaining({ code: 'COMPOUND_EXERCISE_NAME' }),
+    )
+
+    const missingPlanning = makeAuditConditioningLevel()
+    missingPlanning.prep[1] = { ...missingPlanning.prep[1], planningExecutionSeconds: undefined }
+    expect(auditConditioningTemplateLevel(missingPlanning)).toContainEqual(
+      expect.objectContaining({ code: 'CON_PLANNING_TIME' }),
+    )
+  })
+
+  it('uses specificBuildUp for S and keeps rampUp empty', () => {
+    const withRamp = makeAuditConditioningLevel()
+    withRamp.rampUp = [{
+      exerciseKey: 'row-erg',
+      displayName: 'RowErg',
+      order: 1,
+      reps: 5,
+      loadGuidance: 'easy',
+      targetRole: 'SECONDARY',
+    }]
+    expect(auditConditioningTemplateLevel(withRamp)).toContainEqual(
+      expect.objectContaining({ code: 'CON_RAMP_UP_FORBIDDEN' }),
+    )
+
+    const missingBuildUp = makeAuditConditioningLevel()
+    missingBuildUp.specificBuildUp = []
+    expect(auditConditioningTemplateLevel(missingBuildUp)).toContainEqual(
+      expect.objectContaining({ code: 'CON_SPECIFIC_BUILD_UP_REQUIRED' }),
+    )
+  })
+
+  it('requires atomic planning time for build-up and conditioning stations', () => {
+    const missingBuildUpPlanning = makeAuditConditioningLevel()
+    missingBuildUpPlanning.specificBuildUp![0] = {
+      ...missingBuildUpPlanning.specificBuildUp![0],
+      planningExecutionSeconds: undefined as never,
+    }
+    expect(auditConditioningTemplateLevel(missingBuildUpPlanning)).toContainEqual(
+      expect.objectContaining({ code: 'CON_PLANNING_TIME' }),
+    )
+
+    const missingStationPlanning = makeAuditConditioningLevel()
+    const station = missingStationPlanning.blocks[0].exercises[0] as TrainingExercise
+    missingStationPlanning.blocks[0].exercises[0] = {
+      ...station,
+      planningExecutionSeconds: undefined,
+    }
+    expect(auditConditioningTemplateLevel(missingStationPlanning)).toContainEqual(
+      expect.objectContaining({ code: 'CON_PLANNING_TIME' }),
+    )
+  })
+
+  it('requires positive rounds, explicit station transition, and round recovery', () => {
+    const invalidRounds = makeAuditConditioningLevel()
+    invalidRounds.blocks[0] = { ...invalidRounds.blocks[0], rounds: 0 }
+    expect(auditConditioningTemplateLevel(invalidRounds)).toContainEqual(
+      expect.objectContaining({ code: 'CONDITIONING_ROUNDS' }),
+    )
+
+    const invalid = makeAuditConditioningLevel()
+    invalid.blocks[0] = {
+      ...invalid.blocks[0],
+      transitionSeconds: undefined,
+      restBetweenRoundsSeconds: undefined,
+    }
+    const issues = auditConditioningTemplateLevel(invalid)
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'CONDITIONING_TRANSITION' }))
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'CONDITIONING_RECOVERY' }))
+  })
+
+  it('keeps Power before Conditioning and requires the Power recovery boundary', () => {
+    const powerLevel = makeAuditPowerTrackLevel()
+    expect(auditConditioningTemplateLevel(powerLevel)).toEqual([])
+
+    const outOfOrder = makeAuditPowerTrackLevel()
+    outOfOrder.blocks = [outOfOrder.blocks[1], outOfOrder.blocks[0]]
+    expect(auditConditioningTemplateLevel(outOfOrder)).toContainEqual(
+      expect.objectContaining({ code: 'CON_BLOCK_ORDER' }),
+    )
+
+    const missingPowerRecovery = makeAuditPowerTrackLevel()
+    missingPowerRecovery.blocks[0] = { ...missingPowerRecovery.blocks[0], restBetweenSetsSeconds: undefined }
+    expect(auditConditioningTemplateLevel(missingPowerRecovery)).toContainEqual(
+      expect.objectContaining({ code: 'POWER_RECOVERY_REQUIRED' }),
+    )
+
+    const missingBoundary = makeAuditPowerTrackLevel()
+    missingBoundary.blocks[0] = { ...missingBoundary.blocks[0], transitionAfterSeconds: undefined }
+    expect(auditConditioningTemplateLevel(missingBoundary)).toContainEqual(
+      expect.objectContaining({ code: 'POWER_TO_CONDITIONING_TRANSITION_REQUIRED' }),
+    )
+  })
+
+  it('rejects strength semantics, RIR, and action-level sets in conditioning work', () => {
+    const withRir = makeAuditConditioningLevel()
+    const firstStation = withRir.blocks[0].exercises[0] as TrainingExercise
+    withRir.blocks[0].exercises[0] = {
+      ...firstStation,
+      prescription: { ...firstStation.prescription, rir: 2 },
+    }
+    expect(auditConditioningTemplateLevel(withRir)).toContainEqual(
+      expect.objectContaining({ code: 'CON_RIR_FORBIDDEN' }),
+    )
+
+    const withSets = makeAuditConditioningLevel()
+    const setStation = withSets.blocks[0].exercises[0] as TrainingExercise
+    withSets.blocks[0].exercises[0] = {
+      ...setStation,
+      prescription: { ...setStation.prescription, sets: 3 },
+    }
+    expect(auditConditioningTemplateLevel(withSets)).toContainEqual(
+      expect.objectContaining({ code: 'CONDITIONING_SETS_FORBIDDEN' }),
+    )
+
+    const withStrength = makeAuditConditioningLevel()
+    withStrength.blocks[0] = { ...withStrength.blocks[0], kind: 'strength' }
+    expect(auditConditioningTemplateLevel(withStrength)).toContainEqual(
+      expect.objectContaining({ code: 'CON_BLOCK_KIND' }),
+    )
+  })
+
+  it('enforces CON role mapping without requiring PRIMARY', () => {
+    const invalid = makeAuditConditioningLevel()
+    const carry = invalid.blocks[0].exercises[1] as TrainingExercise
+    invalid.blocks[0].exercises[1] = { ...carry, role: 'CONDITIONING' }
+    expect(auditConditioningTemplateLevel(invalid)).toContainEqual(
+      expect.objectContaining({ code: 'CON_ROLE_MAPPING' }),
+    )
+  })
+
+  it('requires output, intensity, progression, and planning metadata', () => {
+    const incomplete = makeAuditConditioningLevel()
+    incomplete.outputPlan = undefined
+    incomplete.conditioningIntensityTarget = undefined
+    incomplete.planningTime = undefined
+    incomplete.progressionFromPrevious = undefined
+    const issues = auditConditioningTemplateLevel(incomplete)
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'CON_OUTPUT_PLAN' }))
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'CON_INTENSITY_TARGET' }))
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'CON_PLANNING_TIME' }))
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'CON_PROGRESSION_REQUIRED' }))
+  })
+
+  it('allows applicable progression variables plus output and density, but rejects RIR', () => {
+    const valid = makeAuditConditioningLevel()
+    valid.progressionFromPrevious = {
+      variables: ['load', 'volume', 'rest', 'control', 'output', 'density'],
+      note: 'Increase output and density while preserving repeatability.',
+    }
+    expect(auditConditioningTemplateLevel(valid)).toEqual([])
+
+    const invalid = makeAuditConditioningLevel()
+    invalid.progressionFromPrevious = { variables: ['rir'], note: 'Do more.' }
+    expect(auditConditioningTemplateLevel(invalid)).toContainEqual(
+      expect.objectContaining({ code: 'CON_PROGRESSION_RIR_FORBIDDEN' }),
+    )
+  })
+
+  it('validates conditional round policy without treating four rounds as an optional exercise', () => {
+    const valid = makeAuditConditioningLevel()
+    valid.blocks[0] = {
+      ...valid.blocks[0],
+      roundPolicy,
+    }
+    expect(auditConditioningTemplateLevel(valid)).toEqual([])
+
+    const invalid = makeAuditConditioningLevel()
+    invalid.blocks[0] = {
+      ...invalid.blocks[0],
+      roundPolicy: { standardRounds: 3, conditionalMaxRounds: 3, conditions: ['output-stability'] },
+    }
+    expect(auditConditioningTemplateLevel(invalid)).toContainEqual(
+      expect.objectContaining({ code: 'CON_ROUND_POLICY_INVALID' }),
+    )
+  })
+
+  it('keeps Foundation Regression separate from peer Power Track options', () => {
+    const invalid = makeAuditPowerTrackLevel()
+    const slot = invalid.blocks[0].exercises[0] as PowerTrackSlot
+    slot.options = [...slot.options, {
+      optionKey: 'foundation-regression',
+      trackKey: 'foundation',
+      path: makeAuditPowerPath('foundation-peer', 'medicine-ball-slam'),
+      requiresTechniqueCompetency: false,
+    }]
+    expect(auditConditioningTemplateLevel(invalid)).toContainEqual(
+      expect.objectContaining({ code: 'CON_FOUNDATION_REGRESSION_INVALID' }),
+    )
+  })
+
+  it('does not require absolute pace, watts, or load values to pass the design audit', () => {
+    const level = makeAuditConditioningLevel()
+    level.outputPlan = {
+      ...outputPlan,
+      primary: { kind: 'pace', scope: 'bout', availability: 'when-available' },
+    }
+    expect(auditConditioningTemplateLevel(level)).toEqual([])
   })
 })
 
