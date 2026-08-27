@@ -593,7 +593,10 @@ const validateFatigueStack = (
 
 export const auditSharedTemplateLevel = (
   level: ProgrammingTemplateLevel,
-  options: { requireExplicitPatternPrep?: boolean } = {},
+  options: {
+    requireExplicitPatternPrep?: boolean
+    requirePrimaryRole?: boolean
+  } = {},
 ): AuditIssue[] => {
   const issues: AuditIssue[] = []
   if (!level.primaryGoal.trim()) {
@@ -601,9 +604,11 @@ export const auditSharedTemplateLevel = (
   }
 
   const formalExercises = allExercises(level)
-  const primaryCount = formalExercises.filter((exercise) => exercise.role === 'PRIMARY').length
-  if (primaryCount !== 1) {
-    issues.push(issue('PRIMARY_COUNT', 'blocks', 'Every level must contain exactly one PRIMARY exercise.'))
+  if (options.requirePrimaryRole !== false) {
+    const primaryCount = formalExercises.filter((exercise) => exercise.role === 'PRIMARY').length
+    if (primaryCount !== 1) {
+      issues.push(issue('PRIMARY_COUNT', 'blocks', 'Every level must contain exactly one PRIMARY exercise.'))
+    }
   }
   formalExercises.forEach((exercise, index) => validateExercise(exercise, 'exercise[' + index + ']', issues))
   level.blocks.forEach((block, blockIndex) => {
@@ -645,6 +650,10 @@ export const audit3CTemplateLevel = (
 
   return issues
 }
+
+export const auditConditioningTemplateLevel = (
+  level: ProgrammingTemplateLevel,
+): AuditIssue[] => auditSharedTemplateLevel(level, { requirePrimaryRole: false })
 
 // Preserve the Phase 1 public API for callers that audit a 3C level directly.
 export const auditTemplateLevel = audit3CTemplateLevel
@@ -1180,9 +1189,27 @@ export const auditProgrammingTemplateSet = (
   const issues: AuditIssue[] = []
   const threeC = templates.filter((template) => template.system === '3c')
   const body = templates.filter((template) => template.system === 'body')
+  const conditioning = templates.filter((template) => template.system === 'conditioning')
   if (threeC.length > 0) issues.push(...audit3CTemplateSet(threeC))
   if (body.length > 0) issues.push(...auditBodyTemplateSet(body))
-  if (templates.some((template) => template.system !== '3c' && template.system !== 'body')) {
+  conditioning.forEach((template) => {
+    ;(['l1', 'l2', 'l3', 'l4'] as const).forEach((programLevel) => {
+      const level = template.levels[programLevel]
+      if (!level) {
+        issues.push(issue('LEVEL_SET', template.id + '/' + programLevel, 'Template level is missing.'))
+        return
+      }
+      auditConditioningTemplateLevel(level).forEach((levelIssue) => {
+        issues.push({
+          ...levelIssue,
+          path: template.id + '/' + level.programLevel + '/' + levelIssue.path,
+        })
+      })
+    })
+  })
+  if (templates.some((template) => template.system !== '3c'
+    && template.system !== 'body'
+    && template.system !== 'conditioning')) {
     issues.push(issue('SYSTEM_INVALID', 'templates', 'Programming templates must use a supported system.'))
   }
   return issues

@@ -13,6 +13,7 @@ import {
   type PowerTrackOption,
   type PrepItem,
   type ProgrammingSelection,
+  type ProgrammingTemplate,
   type ProgrammingTemplateLevel,
   type ResolvedTrainingBlock,
   type SpecificBuildUpItem,
@@ -20,7 +21,11 @@ import {
   type TrainingExercise,
   type TrainingSystem,
 } from '../src/data/programming/types'
-import { resolveProgrammingLevel } from '../src/data/programming/rules'
+import {
+  auditConditioningTemplateLevel,
+  auditProgrammingTemplateSet,
+  resolveProgrammingLevel,
+} from '../src/data/programming/rules'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 
 const prep: PrepItem = {
@@ -202,6 +207,20 @@ const l3ResolverFixture = makeConditioningLevel(
   'medicine-ball-slam',
 )
 
+const conditioningTemplateFixture: ProgrammingTemplate = {
+  id: 'con1',
+  code: 'CON01',
+  system: 'conditioning',
+  name: 'Conditioning fixture',
+  description: 'Conditioning audit fixture',
+  levels: {
+    l1: l3ResolverFixture,
+    l2: l3ResolverFixture,
+    l3: l3ResolverFixture,
+    l4: l3ResolverFixture,
+  },
+}
+
 describe('conditioning Programming type contract', () => {
   it('accepts the conditioning system and conditioning block kind', () => {
     const system: TrainingSystem = 'conditioning'
@@ -287,6 +306,20 @@ describe('conditioning type contract fixture sanity', () => {
 
     expect(prescription.distanceMeters).toBe(20)
     expect(laterality).toBe('unilateral')
+  })
+})
+
+describe('conditioning audit separation', () => {
+  it('does not require a PRIMARY role for a conditioning level', () => {
+    expect(auditConditioningTemplateLevel(l3ResolverFixture)).not.toContainEqual(
+      expect.objectContaining({ code: 'PRIMARY_COUNT' }),
+    )
+  })
+
+  it('dispatches conditioning templates without treating the system as invalid', () => {
+    expect(auditProgrammingTemplateSet([conditioningTemplateFixture])).not.toContainEqual(
+      expect.objectContaining({ code: 'SYSTEM_INVALID' }),
+    )
   })
 })
 
