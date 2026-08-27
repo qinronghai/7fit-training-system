@@ -31,6 +31,7 @@ import {
   resolveProgrammingLevel,
 } from '../src/data/programming/rules'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
+import { threeCTemplates } from '../src/data/programming/threeCTemplates'
 
 const prep: PrepItem = {
   exerciseKey: 'conditioning-prep',
@@ -709,6 +710,11 @@ describe('conditioning structural audit', () => {
 })
 
 describe('conditioning component time estimator', () => {
+  it('keeps the conditioning component branch additive for 3C and BODY', () => {
+    expect(estimateSessionMinutes(threeCTemplates[0].levels.l1).conditioningComponentsSeconds).toBeUndefined()
+    expect(estimateSessionMinutes(bodyTemplates[0].levels.l1).conditioningComponentsSeconds).toBeUndefined()
+  })
+
   it('uses the resolved selection before calculating the time components', () => {
     const powerLevel = makeAuditPowerTrackLevel()
     const estimate = estimateSessionMinutes(powerLevel)
