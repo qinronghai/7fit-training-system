@@ -26,7 +26,7 @@ describe('7Fit V6 content contract', () => {
     const con3L3 = templates.find((template) => template.id === 'con3')!.levels.l3
     const con3L4 = templates.find((template) => template.id === 'con3')!.levels.l4
 
-    expect(con1L1.warmup[0]).toMatchObject({ name: 'RowErg', tag: 'Raise' })
+    expect(con1L1.warmup[0]).toMatchObject({ name: 'RowErg 轻划', tag: 'Raise' })
     expect(con1L1.warmup.some((item) => item.tag === 'Specific Build-up')).toBe(true)
     expect(con1L1.exercises.map((exercise) => exercise.name)).toEqual(['RowErg'])
     expect(con3L3.exercises.map((exercise) => exercise.name)).toContain('药球下砸')

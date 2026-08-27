@@ -143,6 +143,7 @@ export type ConditioningPowerPath = {
   prep: PrepItem[]
   specificBuildUp: SpecificBuildUpItem[]
   powerExercise: TrainingExercise
+  planningTime?: Pick<ConditioningPlanningTime, 'buildUpCoachingAllowanceSeconds'>
 }
 
 export type PowerTrackOption = {

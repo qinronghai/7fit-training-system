@@ -7,6 +7,7 @@ import {
   type ConditioningOutputPlan,
   type ConditioningPlanningTime,
   type ConditioningRoundPolicy,
+  type Count,
   type ExercisePrescription,
   type Laterality,
   type NumericRange,
@@ -379,245 +380,744 @@ const makeAuditMultiStationLevel = (stationCount: number): ProgrammingTemplateLe
   return level
 }
 
+type FrozenPrepManifest = {
+  exerciseKey: string
+  phase: PrepItem['phase']
+  prescription: ExercisePrescription
+  planningExecutionSeconds: NumericRange
+  laterality: Laterality
+}
+
+type FrozenBuildManifest = {
+  exerciseKey: string
+  order: number
+  prescription: ExercisePrescription
+  planningExecutionSeconds: NumericRange
+  laterality?: Laterality
+  sideExecution?: SpecificBuildUpItem['sideExecution']
+  sideRestSeconds?: Count
+  restAfterSeconds?: Count
+  transitionAfterSeconds?: Count
+}
+
 type FrozenStationManifest = {
   exerciseKey: string
   role: string
   movementPattern: string
   laterality: Laterality
   prescription: ExercisePrescription
+  planningExecutionSeconds: NumericRange
+  sideExecution?: TrainingExercise['sideExecution']
+  sideRestSeconds?: Count
+  startingSidePolicy?: TrainingExercise['startingSidePolicy']
+  restSeconds?: Count
+}
+
+type FrozenBlockManifest = {
+  id: string
+  kind: TrainingBlock['kind']
+  rounds?: number
+  restBetweenSetsSeconds?: Count
+  restBetweenRoundsSeconds?: Count
+  transitionSeconds?: Count
+  transitionBetweenRoundsSeconds?: Count
+  transitionAfterSeconds?: Count
+  stations: FrozenStationManifest[]
+}
+
+type FrozenScenarioManifest = {
+  name: string
+  selection: ProgrammingSelection
+  prep: FrozenPrepManifest[]
+  specificBuildUp: FrozenBuildManifest[]
+  blocks?: FrozenBlockManifest[]
+  planningTime?: ConditioningPlanningTime
+  powerExercise?: FrozenStationManifest
+  calculatedTime: NumericRange
 }
 
 type FrozenLevelManifest = {
   templateId: string
   level: 'l1' | 'l2' | 'l3' | 'l4'
   primaryGoal: string
-  prepKeys: string[]
-  specificBuildUpKeys: string[]
-  blockKinds: TrainingBlock['kind'][]
-  blockIds: string[]
-  rounds: (number | NumericRange | undefined)[]
-  stations: FrozenStationManifest[][]
+  secondaryGoal: string
+  prep: FrozenPrepManifest[]
+  specificBuildUp: FrozenBuildManifest[]
+  blocks: FrozenBlockManifest[]
+  outputStability: string
+  coachNoteIncludes: string[]
+  planningTime: ConditioningPlanningTime
+  calculatedTime: NumericRange
+  scenarios?: FrozenScenarioManifest[]
 }
 
-const station = (
+const frozenPrep = (
+  exerciseKey: string,
+  phase: PrepItem['phase'],
+  prescription: ExercisePrescription,
+  planningExecutionSeconds: NumericRange,
+  laterality: Laterality = 'bilateral',
+): FrozenPrepManifest => ({ exerciseKey, phase, prescription, planningExecutionSeconds, laterality })
+
+const frozenBuild = (
+  exerciseKey: string,
+  order: number,
+  prescription: ExercisePrescription,
+  planningExecutionSeconds: NumericRange,
+  options: Pick<FrozenBuildManifest, 'laterality' | 'sideExecution' | 'sideRestSeconds' | 'restAfterSeconds' | 'transitionAfterSeconds'> = {},
+): FrozenBuildManifest => ({ exerciseKey, order, prescription, planningExecutionSeconds, ...options })
+
+const frozenStation = (
   exerciseKey: string,
   role: string,
   movementPattern: string,
   prescription: ExercisePrescription,
-  laterality: Laterality = 'bilateral',
-): FrozenStationManifest => ({ exerciseKey, role, movementPattern, laterality, prescription })
+  planningExecutionSeconds: NumericRange,
+  options: Partial<Pick<FrozenStationManifest, 'laterality' | 'sideExecution' | 'sideRestSeconds' | 'startingSidePolicy' | 'restSeconds'>> = {},
+): FrozenStationManifest => ({
+  exerciseKey,
+  role,
+  movementPattern,
+  prescription,
+  planningExecutionSeconds,
+  ...options,
+  laterality: options.laterality ?? 'bilateral',
+})
+
+const conditioningBlockManifest = (
+  stations: FrozenStationManifest[],
+  rounds: number,
+  restBetweenRoundsSeconds: Count,
+  transitionSeconds: Count,
+  transitionBetweenRoundsSeconds: Count,
+): FrozenBlockManifest => ({
+  id: 'conditioning-main',
+  kind: 'conditioning',
+  rounds,
+  restBetweenRoundsSeconds,
+  transitionSeconds,
+  transitionBetweenRoundsSeconds,
+  stations,
+})
+
+const powerBlockManifest = (
+  station: FrozenStationManifest,
+  restBetweenSetsSeconds: Count,
+  transitionAfterSeconds: Count,
+): FrozenBlockManifest => ({
+  id: 'power',
+  kind: 'power',
+  restBetweenSetsSeconds,
+  transitionAfterSeconds,
+  stations: [station],
+})
+
+const frozenOutputStability = (description: string): string => description
+
+const frozenPlanning = (
+  setupCoachingAllowanceSeconds: NumericRange,
+  buildUpCoachingAllowanceSeconds: NumericRange,
+): ConditioningPlanningTime => ({
+  setupCoachingAllowanceSeconds,
+  buildUpCoachingAllowanceSeconds,
+})
 
 const frozenConditioningManifest: FrozenLevelManifest[] = [
   {
-    templateId: 'con1', level: 'l1', primaryGoal: 'Learn to Pace',
-    prepKeys: ['row-erg', 'thoracic-rotation', 'band-pull-apart', 'row-erg-technique'],
-    specificBuildUpKeys: ['row-erg-pacing-bout'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [6], stations: [[station('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 30 })]],
+    templateId: 'con1', level: 'l1', primaryGoal: 'Learn to Pace', secondaryGoal: '建立基础划船技术和恢复节奏。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('row-erg-technique', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build-easy', 1, { durationSeconds: 20, sets: 2 }, { min: 20, max: 20 }),
+      frozenBuild('row-erg-build-recovery', 2, { durationSeconds: 40, sets: 2 }, { min: 40, max: 40 }, { transitionAfterSeconds: { min: 15, max: 20 } }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 30 }, { min: 30, max: 30 }),
+    ], 6, 45, 0, 0)],
+    outputStability: frozenOutputStability('第 6 轮距离应接近前几轮；不得出现首轮明显快于后续轮次的输出崩落。'),
+    coachNoteIncludes: ['降低目标配速', '停止训练'],
+    planningTime: frozenPlanning({ min: 240, max: 360 }, { min: 0, max: 0 }),
+    calculatedTime: { min: 16.75, max: 19.58 },
   },
   {
-    templateId: 'con1', level: 'l2', primaryGoal: 'Repeat Output',
-    prepKeys: ['row-erg', 'thoracic-rotation', 'band-pull-apart', 'row-erg-technique'],
-    specificBuildUpKeys: ['row-erg-repeat-bout'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [6], stations: [[station('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 40 })]],
+    templateId: 'con1', level: 'l2', primaryGoal: 'Repeat Output', secondaryGoal: '提高 40s 工作段的配速控制能力。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('band-straight-arm-pulldown', 'A', { reps: 8 }, { min: 45, max: 60 }),
+      frozenPrep('row-erg-rhythm', 'P', { reps: { min: 6, max: 8 } }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build-moderate', 1, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('row-erg-build-easy', 2, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('row-erg-build-target', 3, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('row-erg-build-recovery', 4, { durationSeconds: 20 }, { min: 20, max: 20 }, { transitionAfterSeconds: { min: 15, max: 20 } }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 40 }, { min: 40, max: 40 }),
+    ], 6, 40, 0, 0)],
+    outputStability: frozenOutputStability('第 6 轮仍应保持接近前几轮的距离和配速。'),
+    coachNoteIncludes: ['降低目标配速', '恢复时间回到 45s'],
+    planningTime: frozenPlanning({ min: 240, max: 360 }, { min: 0, max: 0 }),
+    calculatedTime: { min: 16.67, max: 19.50 },
   },
   {
-    templateId: 'con1', level: 'l3', primaryGoal: 'Sustain Output',
-    prepKeys: ['row-erg', 'lateral-lunge-mobility', 'band-straight-arm-pulldown', 'row-erg-technique'],
-    specificBuildUpKeys: ['row-erg-sustain-bout'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [6], stations: [[station('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 45 })]],
+    templateId: 'con1', level: 'l3', primaryGoal: 'Sustain Output', secondaryGoal: '提高可持续 Work density，而不是追求单轮最大速度。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: { min: 75, max: 90 } }, { min: 75, max: 90 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('row-erg-long-stroke', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build-target-long', 1, { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenBuild('row-erg-build-easy', 2, { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenBuild('row-erg-build-target-short', 3, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('row-erg-build-recovery-short', 4, { durationSeconds: 20 }, { min: 20, max: 20 }, { transitionAfterSeconds: { min: 25, max: 30 } }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 45 }, { min: 45, max: 45 }),
+    ], 6, 30, 0, 0)],
+    outputStability: frozenOutputStability('在 Recovery 缩短后，第 4–6 轮仍需保持目标距离，不能通过首轮过度冲刺换取高 RPE。'),
+    coachNoteIncludes: ['Recovery 从 30s 调回 45s', '停止该 Block'],
+    planningTime: frozenPlanning({ min: 300, max: 420 }, { min: 0, max: 0 }),
+    calculatedTime: { min: 17.58, max: 20.67 },
   },
   {
-    templateId: 'con1', level: 'l4', primaryGoal: 'High Repeatable Output',
-    prepKeys: ['row-erg', 'inchworm', 'dead-bug', 'row-erg-technique'],
-    specificBuildUpKeys: ['row-erg-high-output-bout'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [8], stations: [[station('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 30 })]],
+    templateId: 'con1', level: 'l4', primaryGoal: 'High Repeatable Output', secondaryGoal: '建立高输出但可重复的 Erg interval 能力。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('band-straight-arm-pulldown', 'A', { reps: 8 }, { min: 45, max: 60 }),
+      frozenPrep('row-erg-target-pace', 'P', { reps: 5 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build-control', 1, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('row-erg-build-easy', 2, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('row-erg-build-target', 3, { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenBuild('row-erg-build-easy-long', 4, { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenBuild('row-erg-build-target-final', 5, { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenBuild('row-erg-build-recovery-final', 6, { durationSeconds: { min: 25, max: 30 } }, { min: 25, max: 30 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { durationSeconds: 30 }, { min: 30, max: 30 }),
+    ], 8, 60, 0, 0)],
+    outputStability: frozenOutputStability('第 7–8 轮仍应维持接近前两轮的距离；不得通过第一轮超出可持续范围的冲刺制造虚假成绩。'),
+    coachNoteIncludes: ['降低目标距离', '停止 Block'],
+    planningTime: frozenPlanning({ min: 300, max: 420 }, { min: 0, max: 0 }),
+    calculatedTime: { min: 22.33, max: 25.17 },
   },
   {
-    templateId: 'con2', level: 'l1', primaryGoal: 'Learn to Move Under Load',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'hip-hinge-drill'],
-    specificBuildUpKeys: ['light-sled-push', 'light-farmer-carry'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 15 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 20 }),
-    ]],
+    templateId: 'con2', level: 'l1', primaryGoal: 'Learn to Move Under Load', secondaryGoal: '保持姿势、呼吸和站点转换质量。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: { min: 60, max: 90 } }, { min: 60, max: 90 }),
+      frozenPrep('wall-ankle-knee-to-wall', 'M', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('glute-bridge', 'A', { reps: 8 }, { min: 45, max: 60 }),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('light-sled-push', 1, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('light-farmer-carry', 2, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 15 }, { min: 25, max: 45 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 20 }, { min: 30, max: 50 }),
+    ], 3, { min: 60, max: 75 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('三轮之间 Sled split 不应逐轮明显变慢；Carry 应保持躯干稳定、步幅连续和握持控制。'),
+    coachNoteIncludes: ['降低雪橇负荷', '降低 Carry 负荷', '延长站点转换'],
+    planningTime: frozenPlanning({ min: 300, max: 420 }, { min: 25, max: 45 }),
+    calculatedTime: { min: 15.42, max: 22.50 },
   },
   {
-    templateId: 'con2', level: 'l2', primaryGoal: 'Repeat Loaded Movement',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'hip-hinge-drill'],
-    specificBuildUpKeys: ['moderate-sled-push', 'moderate-farmer-carry'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 25 }),
-    ]],
+    templateId: 'con2', level: 'l2', primaryGoal: 'Repeat Loaded Movement', secondaryGoal: '在标准 Recovery 下保持 Sled split 和 Carry 姿势。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 75 }, { min: 75, max: 75 }),
+      frozenPrep('wall-ankle-knee-to-wall', 'M', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('glute-bridge', 'A', { reps: 8 }, { min: 45, max: 60 }),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('moderate-sled-push', 1, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('moderate-farmer-carry', 2, { distanceMeters: 15 }, { min: 20, max: 30 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 25 }, { min: 40, max: 60 }),
+    ], 3, 60, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('在距离增加后，第 3 轮仍需保持稳定呼吸和可接受的 Sled split。'),
+    coachNoteIncludes: ['降低负荷', '增加 Round Recovery'],
+    planningTime: frozenPlanning({ min: 300, max: 420 }, { min: 20, max: 40 }),
+    calculatedTime: { min: 16.67, max: 22.75 },
   },
   {
-    templateId: 'con2', level: 'l3', primaryGoal: 'Sustain Loaded Output',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'hip-hinge-drill'],
-    specificBuildUpKeys: ['moderate-high-sled-push', 'moderate-high-farmer-carry'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [4], stations: [[
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }),
-    ]],
+    templateId: 'con2', level: 'l3', primaryGoal: 'Sustain Loaded Output', secondaryGoal: '建立可重复的高工作容量，同时保留输出余量。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+      frozenPrep('wall-ankle-knee-to-wall', 'M', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('glute-bridge', 'A', { reps: 8 }, { min: 45, max: 60 }),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('moderate-high-sled-push', 1, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('moderate-high-farmer-carry', 2, { distanceMeters: 15 }, { min: 20, max: 30 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }, { min: 50, max: 75 }),
+    ], 4, { min: 60, max: 75 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('第 4 轮仍需保持目标 split 和姿势；L3 要求存在可观察的输出余量，而不是每轮都接近失败。'),
+    coachNoteIncludes: ['降低雪橇负荷', '降低 Carry 负荷', '不通过增加复杂 Carry'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 25, max: 40 }),
+    calculatedTime: { min: 21.50, max: 29.50 },
   },
   {
-    templateId: 'con2', level: 'l4', primaryGoal: 'High Loaded Repeatability',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'hip-hinge-drill'],
-    specificBuildUpKeys: ['high-control-sled-push', 'high-control-farmer-carry'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [4], stations: [[
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }),
-    ]],
+    templateId: 'con2', level: 'l4', primaryGoal: 'High Loaded Repeatability', secondaryGoal: '保持目标 split、Carry 姿势和四轮输出稳定。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+      frozenPrep('wall-ankle-knee-to-wall', 'M', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('glute-bridge', 'A', { reps: 8 }, { min: 45, max: 60 }),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('high-control-sled-push', 1, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('high-control-farmer-carry', 2, { distanceMeters: 15 }, { min: 20, max: 30 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }, { min: 50, max: 75 }),
+    ], 4, { min: 75, max: 90 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('L4 的负荷必须能够让四轮都完成。若第 3–4 轮明显崩盘，该负荷不属于可重复工作负荷。'),
+    coachNoteIncludes: ['降低 Sled 或 Carry 负荷', '延长 Round Recovery', '不以更复杂的 Carry'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 25, max: 40 }),
+    calculatedTime: { min: 22.25, max: 30.25 },
   },
   {
-    templateId: 'con3', level: 'l1', primaryGoal: 'Learn to Produce Power',
-    prepKeys: ['row-erg', 'wall-hip-hinge', 'standing-brace', 'medicine-ball-slam-stance'],
-    specificBuildUpKeys: ['medicine-ball-slam-build'], blockKinds: ['power', 'conditioning'], blockIds: ['power', 'conditioning-main'],
-    rounds: [undefined, 3], stations: [[
-      station('con3-l1-power', 'POWER', 'hinge', { sets: 3, reps: 5 }),
-    ], [
-      station('kb-deadlift', 'CONDITIONING', 'hinge', { reps: 8 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 20 }),
-    ]],
+    templateId: 'con3', level: 'l1', primaryGoal: 'Learn to Produce Power', secondaryGoal: '建立基础爆发动作和低复杂度负重移动能力。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: { min: 60, max: 90 } }, { min: 60, max: 90 }),
+      frozenPrep('wall-hip-hinge', 'M', { reps: 6 }, { min: 45, max: 60 }),
+      frozenPrep('glute-bridge', 'A', { reps: 8 }, { min: 45, max: 60 }),
+      frozenPrep('medicine-ball-slam-technique', 'P', { reps: 3 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('medicine-ball-slam-build', 1, { reps: 3 }, { min: 6, max: 12 }),
+      frozenBuild('kb-deadlift-build', 2, { reps: 4 }, { min: 10, max: 20 }),
+      frozenBuild('farmer-carry-build', 3, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [
+      powerBlockManifest(frozenStation('medicine-ball-slam', 'POWER', 'hinge', { sets: 3, reps: 5 }, { min: 10, max: 20 }, { restSeconds: 60 }), 60, { min: 45, max: 60 }),
+      conditioningBlockManifest([
+        frozenStation('kb-deadlift', 'CONDITIONING', 'hinge', { reps: 8 }, { min: 20, max: 35 }),
+        frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 20 }, { min: 30, max: 50 }),
+      ], 3, 60, { min: 20, max: 30 }, { min: 15, max: 20 }),
+    ],
+    outputStability: frozenOutputStability('Medicine Ball Slam 的每组 5 次保持主动速度意图；Capacity 三轮不因局部疲劳破坏 Carry 姿势。'),
+    coachNoteIncludes: ['立即结束该组', '降低负荷', '不把 Power 动作移入 Capacity'],
+    planningTime: frozenPlanning({ min: 300, max: 420 }, { min: 35, max: 45 }),
+    calculatedTime: { min: 18.60, max: 25.62 },
   },
   {
-    templateId: 'con3', level: 'l2', primaryGoal: 'Repeat Low-Complexity Power',
-    prepKeys: ['row-erg', 'wall-hip-hinge', 'standing-brace', 'medicine-ball-slam-stance'],
-    specificBuildUpKeys: ['medicine-ball-slam-build'], blockKinds: ['power', 'conditioning'], blockIds: ['power', 'conditioning-main'],
-    rounds: [undefined, 3], stations: [[
-      station('con3-l2-power', 'POWER', 'hinge', { sets: 4, reps: 5 }),
-    ], [
-      station('kb-rdl', 'CONDITIONING', 'hinge', { reps: { min: 8, max: 10 } }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 25 }),
-    ]],
+    templateId: 'con3', level: 'l2', primaryGoal: 'Repeat Low-Complexity Power', secondaryGoal: '提高低复杂度 Hinge 与 Carry 的重复输出。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: { min: 75, max: 90 } }, { min: 75, max: 90 }),
+      frozenPrep('wall-hip-hinge', 'M', { reps: 6 }, { min: 45, max: 55 }),
+      frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 55 }, 'unilateral'),
+      frozenPrep('medicine-ball-slam-technique', 'P', { reps: 3 }, { min: 45, max: 55 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('medicine-ball-slam-build', 1, { reps: 3 }, { min: 6, max: 12 }),
+      frozenBuild('kb-rdl-build', 2, { reps: 4 }, { min: 15, max: 25 }),
+      frozenBuild('farmer-carry-build', 3, { distanceMeters: 15 }, { min: 20, max: 30 }),
+    ],
+    blocks: [
+      powerBlockManifest(frozenStation('medicine-ball-slam', 'POWER', 'hinge', { sets: 4, reps: 5 }, { min: 10, max: 20 }, { restSeconds: 60 }), 60, { min: 45, max: 60 }),
+      conditioningBlockManifest([
+        frozenStation('kb-rdl', 'CONDITIONING', 'hinge', { reps: { min: 8, max: 10 } }, { min: 25, max: 40 }),
+        frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 25 }, { min: 40, max: 60 }),
+      ], 3, 60, { min: 20, max: 30 }, { min: 15, max: 20 }),
+    ],
+    outputStability: frozenOutputStability('四组 Medicine Ball Slam 的第 4 组仍需保持主动速度意图；Capacity 第 3 轮不出现明显 Carry 姿势下降。'),
+    coachNoteIncludes: ['停止当前组', '降低 KB 负荷', '延长 Round Recovery'],
+    planningTime: frozenPlanning({ min: 300, max: 420 }, { min: 30, max: 45 }),
+    calculatedTime: { min: 20.85, max: 27.62 },
   },
   {
-    templateId: 'con3', level: 'l3', primaryGoal: 'Higher Repeatable Power',
-    prepKeys: ['row-erg', 'wall-hip-hinge', 'standing-brace', 'medicine-ball-slam-stance'],
-    specificBuildUpKeys: ['medicine-ball-slam-build'], blockKinds: ['power', 'conditioning'], blockIds: ['power', 'conditioning-main'],
-    rounds: [undefined, 4], stations: [[
-      station('con3-l3-power', 'POWER', 'hinge', { sets: 3, reps: 5 }),
-    ], [station('farmer-carry', 'CARRY', 'carry', { distanceMeters: { min: 25, max: 30 } })]],
+    templateId: 'con3', level: 'l3', primaryGoal: 'Higher Repeatable Power', secondaryGoal: '在 Power Block 后维持四轮 Carry 输出。',
+    prep: [], specificBuildUp: [], blocks: [
+      powerBlockManifest(
+        frozenStation('medicine-ball-slam', 'POWER', 'hinge', { sets: 4, reps: 5 }, { min: 10, max: 20 }, { restSeconds: { min: 60, max: 75 } }),
+        { min: 60, max: 75 },
+        { min: 60, max: 90 },
+      ),
+      conditioningBlockManifest([
+        frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: { min: 25, max: 30 } }, { min: 40, max: 75 }),
+      ], 4, { min: 60, max: 75 }, 0, 0),
+    ],
+    outputStability: frozenOutputStability('Power Block 每组动作质量保持稳定；Carry 第 4 轮仍需完成目标距离和姿势控制。'),
+    coachNoteIncludes: ['不在 Swing 前先做另一条 Power 路径', '降低负荷', '不用 RIR'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 31, max: 50 }),
+    calculatedTime: { min: 20.52, max: 31.00 },
+    scenarios: [
+      {
+        name: 'Medicine Ball Power Track',
+        selection: {},
+        prep: [
+          frozenPrep('row-erg', 'R', { durationSeconds: { min: 75, max: 90 } }, { min: 75, max: 90 }),
+          frozenPrep('wall-slide', 'M', { reps: 6 }, { min: 45, max: 60 }),
+          frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('medicine-ball-slam-technique', 'P', { reps: 3 }, { min: 45, max: 60 }),
+        ],
+        specificBuildUp: [
+          frozenBuild('medicine-ball-slam-build', 1, { reps: 3 }, { min: 6, max: 12 }),
+          frozenBuild('medicine-ball-slam-target-build', 2, { reps: 2 }, { min: 4, max: 8 }),
+        ],
+        planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 31, max: 50 }),
+        powerExercise: frozenStation('medicine-ball-slam', 'POWER', 'hinge', { sets: 4, reps: 5 }, { min: 10, max: 20 }, { restSeconds: { min: 60, max: 75 } }),
+        calculatedTime: { min: 20.52, max: 29.00 },
+      },
+      {
+        name: 'Swing Track',
+        selection: { powerTracks: { 'con3-l3-power': { optionKey: 'kb-swing', techniqueReady: true } } },
+        prep: [
+          frozenPrep('row-erg', 'R', { durationSeconds: { min: 75, max: 90 } }, { min: 75, max: 90 }),
+          frozenPrep('wall-hip-hinge', 'M', { reps: 6 }, { min: 45, max: 60 }),
+          frozenPrep('glute-bridge', 'A', { reps: 8 }, { min: 45, max: 60 }),
+          frozenPrep('kettlebell-swing-stance', 'P', { reps: 3 }, { min: 45, max: 60 }),
+        ],
+        specificBuildUp: [
+          frozenBuild('kb-deadlift-build', 1, { reps: 3 }, { min: 8, max: 15 }),
+          frozenBuild('kb-swing-build', 2, { reps: 3 }, { min: 10, max: 15 }),
+        ],
+        planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 23, max: 40 }),
+        powerExercise: frozenStation('kb-swing', 'POWER', 'hinge', { sets: 5, reps: 6 }, { min: 15, max: 25 }, { restSeconds: { min: 60, max: 75 } }),
+        calculatedTime: { min: 22.10, max: 31.00 },
+      },
+    ],
   },
   {
-    templateId: 'con3', level: 'l4', primaryGoal: 'High Repeatable Power',
-    prepKeys: ['row-erg', 'wall-hip-hinge', 'standing-brace', 'medicine-ball-slam-stance'],
-    specificBuildUpKeys: ['medicine-ball-slam-build'], blockKinds: ['power', 'conditioning'], blockIds: ['power', 'conditioning-main'],
-    rounds: [undefined, 4], stations: [[
-      station('con3-l4-power', 'POWER', 'hinge', { sets: 3, reps: 5 }),
-    ], [station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 })]],
+    templateId: 'con3', level: 'l4', primaryGoal: 'High Repeatable Power', secondaryGoal: '维持四轮 Carry 输出，而不是用疲劳吞掉爆发质量。',
+    prep: [], specificBuildUp: [], blocks: [
+      powerBlockManifest(
+        frozenStation('medicine-ball-slam', 'POWER', 'hinge', { sets: 4, reps: 5 }, { min: 10, max: 20 }, { restSeconds: 60 }),
+        { min: 75, max: 90 },
+        { min: 75, max: 120 },
+      ),
+      conditioningBlockManifest([
+        frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }, { min: 50, max: 75 }),
+      ], 4, { min: 75, max: 90 }, 0, 0),
+    ],
+    outputStability: frozenOutputStability('L4 需要表现为高质量 Power + 可重复 Capacity。若后半段动作速度、投掷距离或 Carry 姿势明显下降，应调整恢复或负荷。'),
+    coachNoteIncludes: ['Foundation Regression', '不同时执行', '停止当前组', '不降低 Program Level'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 31, max: 50 }),
+    calculatedTime: { min: 22.43, max: 34.75 },
+    scenarios: [
+      {
+        name: 'Foundation Regression', selection: {},
+        prep: [
+          frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+          frozenPrep('wall-slide', 'M', { reps: 6 }, { min: 45, max: 60 }),
+          frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('medicine-ball-slam-technique', 'P', { reps: 3 }, { min: 45, max: 60 }),
+        ],
+        specificBuildUp: [
+          frozenBuild('medicine-ball-slam-build', 1, { reps: 3 }, { min: 6, max: 12 }),
+          frozenBuild('medicine-ball-slam-target-build', 2, { reps: 2 }, { min: 4, max: 8 }),
+        ],
+        planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 31, max: 50 }),
+        powerExercise: frozenStation('medicine-ball-slam', 'POWER', 'hinge', { sets: 4, reps: 5 }, { min: 10, max: 20 }, { restSeconds: 60 }),
+        calculatedTime: { min: 22.43, max: 29.50 },
+      },
+      {
+        name: 'Track A | Hinge Power', selection: { powerTracks: { 'con3-l4-power': { optionKey: 'kb-swing', techniqueReady: true } } },
+        prep: [
+          frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+          frozenPrep('wall-hip-hinge', 'M', { reps: 6 }, { min: 45, max: 60 }),
+          frozenPrep('glute-bridge', 'A', { reps: 8 }, { min: 45, max: 60 }),
+          frozenPrep('kettlebell-swing-stance', 'P', { reps: 3 }, { min: 45, max: 60 }),
+        ],
+        specificBuildUp: [
+          frozenBuild('kb-deadlift-build', 1, { reps: 3 }, { min: 8, max: 15 }),
+          frozenBuild('kb-swing-build', 2, { reps: 3 }, { min: 10, max: 15 }),
+        ],
+        planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 23, max: 40 }),
+        powerExercise: frozenStation('kb-swing', 'POWER', 'hinge', { sets: 5, reps: { min: 5, max: 6 } }, { min: 15, max: 25 }, { restSeconds: { min: 75, max: 90 } }),
+        calculatedTime: { min: 25.02, max: 33.25 },
+      },
+      {
+        name: 'Track B | Rotational Power', selection: { powerTracks: { 'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true } } },
+        prep: [
+          frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+          frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('medicine-ball-rotational-throw-stance', 'P', { reps: 2 }, { min: 45, max: 60 }, 'unilateral'),
+        ],
+        specificBuildUp: [
+          frozenBuild('rotational-throw-build', 1, { reps: 2 }, { min: 12, max: 20 }, { laterality: 'unilateral', sideExecution: 'one-side-then-opposite', sideRestSeconds: { min: 15, max: 20 } }),
+        ],
+        planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 14, max: 55 }),
+        powerExercise: frozenStation('rotational-throw', 'POWER', 'rotation', { sets: 4, reps: 5 }, { min: 30, max: 50 }, { laterality: 'unilateral', sideExecution: 'one-side-then-opposite', sideRestSeconds: { min: 15, max: 20 }, startingSidePolicy: 'alternate-between-sets', restSeconds: { min: 75, max: 90 } }),
+        calculatedTime: { min: 25.52, max: 34.75 },
+      },
+    ],
   },
   {
-    templateId: 'con4', level: 'l1', primaryGoal: 'Basic Multiplanar Capacity',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'step-up-pattern'],
-    specificBuildUpKeys: ['low-box-step-up-build', 'skierg-build', 'bear-crawl-shuttle-build', 'sled-push-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('low-box-step-up', 'CONDITIONING', 'single', { reps: 6 }, 'unilateral'),
-      station('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 25 }),
-      station('bear-crawl-shuttle', 'CONDITIONING', 'core', { distanceMeters: 10 }),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 15 }),
-    ]],
+    templateId: 'con4', level: 'l1', primaryGoal: 'Basic Multiplanar Capacity', secondaryGoal: '建立 Erg、locomotion 与 Sled 之间的基础转换能力。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 60 }, { min: 60, max: 60 }),
+      frozenPrep('wall-ankle-knee-to-wall', 'M', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('band-lateral-walk', 'A', { reps: 6 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('low-box-step-up', 'P', { reps: 3 }, { min: 45, max: 60 }, 'unilateral'),
+    ],
+    specificBuildUp: [
+      frozenBuild('skierg-build', 1, { durationSeconds: 15 }, { min: 15, max: 15 }),
+      frozenBuild('bear-crawl-shuttle-build', 2, { distanceMeters: 6 }, { min: 25, max: 35 }),
+      frozenBuild('sled-push-build', 3, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('low-box-step-up', 'CONDITIONING', 'single', { reps: 6 }, { min: 45, max: 75 }, { laterality: 'unilateral', sideExecution: 'alternating', startingSidePolicy: 'coach-directed' }),
+      frozenStation('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 25 }, { min: 25, max: 25 }),
+      frozenStation('bear-crawl-shuttle', 'CONDITIONING', 'core', { distanceMeters: 10 }, { min: 35, max: 55 }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 15 }, { min: 25, max: 45 }),
+    ], 3, 60, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('方向转换后仍能保持步态、躯干位置和呼吸控制；不得因追求速度而破坏熊爬或台阶上步质量。'),
+    coachNoteIncludes: ['降低箱高', '缩短距离', '降低负荷'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 40, max: 70 }),
+    calculatedTime: { min: 22.83, max: 31.58 },
   },
   {
-    templateId: 'con4', level: 'l2', primaryGoal: 'Lateral Capacity',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'lateral-lunge-pattern'],
-    specificBuildUpKeys: ['lateral-lunge-build', 'skierg-build', 'bear-crawl-build', 'sled-push-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('lateral-lunge', 'CONDITIONING', 'single', { reps: 6 }, 'unilateral'),
-      station('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 30 }),
-      station('bear-crawl', 'CONDITIONING', 'core', { distanceMeters: { min: 6, max: 8 } }),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }),
-    ]],
+    templateId: 'con4', level: 'l2', primaryGoal: 'Lateral Capacity', secondaryGoal: '在侧向动作后保持 Erg 与 Sled 输出。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 60 }, { min: 60, max: 60 }),
+      frozenPrep('wall-ankle-knee-to-wall', 'M', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('band-lateral-walk', 'A', { reps: 6 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('lateral-lunge', 'P', { reps: 3 }, { min: 45, max: 60 }, 'unilateral'),
+    ],
+    specificBuildUp: [
+      frozenBuild('skierg-build', 1, { durationSeconds: 15 }, { min: 15, max: 15 }),
+      frozenBuild('lateral-lunge-build', 2, { reps: 3 }, { min: 25, max: 40 }, { laterality: 'unilateral', sideExecution: 'alternating' }),
+      frozenBuild('bear-crawl-build', 3, { distanceMeters: 4 }, { min: 20, max: 30 }),
+      frozenBuild('sled-push-build', 4, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('lateral-lunge', 'CONDITIONING', 'single', { reps: 6 }, { min: 45, max: 75 }, { laterality: 'unilateral', sideExecution: 'alternating', startingSidePolicy: 'coach-directed' }),
+      frozenStation('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenStation('bear-crawl', 'CONDITIONING', 'core', { distanceMeters: 6 }, { min: 25, max: 40 }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+    ], 3, 60, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('额状面工作增加后，后两轮 SkiErg 与 Sled 输出仍需保持稳定；不以加快转换牺牲侧向控制。'),
+    coachNoteIncludes: ['缩短动作幅度', '缩短距离', '恢复 60s → 75s'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 20, max: 35 }),
+    calculatedTime: { min: 23.08, max: 31.58 },
   },
   {
-    templateId: 'con4', level: 'l3', primaryGoal: 'Sustain Multiplanar Work',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'step-up-knee-drive-pattern'],
-    specificBuildUpKeys: ['step-up-knee-drive-build', 'skierg-build', 'lateral-bear-crawl-build', 'sled-push-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('step-up-knee-drive', 'CONDITIONING', 'single', { reps: 6 }, 'unilateral'),
-      station('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 35 }),
-      station('lateral-bear-crawl', 'CONDITIONING', 'core', { distanceMeters: 6 }, 'unilateral'),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }),
-    ]],
+    templateId: 'con4', level: 'l3', primaryGoal: 'Sustain Multiplanar Work', secondaryGoal: '提高方向变化后的重复能力，而不是堆叠更多动作。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 60 }, { min: 60, max: 60 }),
+      frozenPrep('wall-ankle-knee-to-wall', 'M', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('band-lateral-walk', 'A', { reps: 6 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('step-up-knee-drive', 'P', { reps: 3 }, { min: 45, max: 60 }, 'unilateral'),
+    ],
+    specificBuildUp: [
+      frozenBuild('skierg-build', 1, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('step-up-knee-drive-build', 2, { reps: 3 }, { min: 25, max: 40 }, { laterality: 'unilateral', sideExecution: 'alternating' }),
+      frozenBuild('lateral-bear-crawl-build', 3, { distanceMeters: 3 }, { min: 30, max: 45 }, { laterality: 'unilateral', sideExecution: 'alternating' }),
+      frozenBuild('sled-push-build', 4, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('step-up-knee-drive', 'CONDITIONING', 'single', { reps: 6 }, { min: 50, max: 80 }, { laterality: 'unilateral', sideExecution: 'alternating', startingSidePolicy: 'coach-directed' }),
+      frozenStation('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 35 }, { min: 35, max: 35 }),
+      frozenStation('lateral-bear-crawl', 'CONDITIONING', 'core', { distanceMeters: 6 }, { min: 50, max: 75 }, { laterality: 'unilateral', sideExecution: 'one-side-then-opposite', sideRestSeconds: { min: 10, max: 15 }, startingSidePolicy: 'alternate-between-sets' }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+    ], 3, { min: 60, max: 75 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('第 3 轮仍需维持 SkiErg 和 Sled 输出；locomotion 不能出现髋部塌陷、支撑失控或明显路线偏移。'),
+    coachNoteIncludes: ['降低箱高', '延长 Reset', '降低负荷'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 45, max: 70 }),
+    calculatedTime: { min: 26.00, max: 36.00 },
   },
   {
-    templateId: 'con4', level: 'l4', primaryGoal: 'High Multiplanar Capacity',
-    prepKeys: ['row-erg', 'ankle-dorsiflexion-rock', 'glute-bridge', 'multidirectional-lunge-pattern'],
-    specificBuildUpKeys: ['multidirectional-lunge-build', 'skierg-build', 'lateral-bear-crawl-build', 'sled-push-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('multidirectional-lunge', 'CONDITIONING', 'single', { reps: 3 }, 'unilateral'),
-      station('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 40 }),
-      station('lateral-bear-crawl', 'CONDITIONING', 'core', { distanceMeters: 8 }, 'unilateral'),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: { min: 20, max: 25 } }),
-    ]],
+    templateId: 'con4', level: 'l4', primaryGoal: 'High Multiplanar Capacity', secondaryGoal: '提高方向整合，而不让第一站局部下肢疲劳限制整节课。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: { min: 60, max: 90 } }, { min: 60, max: 90 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('band-lateral-walk', 'A', { reps: 6 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('forward-lunge', 'P', { reps: 3 }, { min: 45, max: 60 }, 'unilateral'),
+    ],
+    specificBuildUp: [
+      frozenBuild('skierg-build', 1, { durationSeconds: 25 }, { min: 25, max: 25 }),
+      frozenBuild('multidirectional-lunge-build', 2, { reps: 3 }, { min: 25, max: 40 }, { laterality: 'unilateral', sideExecution: 'alternating' }),
+      frozenBuild('lateral-bear-crawl-build', 3, { distanceMeters: 4 }, { min: 40, max: 60 }, { laterality: 'unilateral', sideExecution: 'alternating' }),
+      frozenBuild('sled-push-build', 4, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('multidirectional-lunge', 'CONDITIONING', 'single', { reps: 3 }, { min: 45, max: 75 }, { laterality: 'unilateral', sideExecution: 'alternating', startingSidePolicy: 'coach-directed' }),
+      frozenStation('skierg', 'CONDITIONING', 'vpull', { durationSeconds: 40 }, { min: 40, max: 40 }),
+      frozenStation('lateral-bear-crawl', 'CONDITIONING', 'core', { distanceMeters: 8 }, { min: 65, max: 90 }, { laterality: 'unilateral', sideExecution: 'one-side-then-opposite', sideRestSeconds: { min: 15, max: 20 }, startingSidePolicy: 'alternate-between-sets' }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: { min: 20, max: 25 } }, { min: 35, max: 65 }),
+    ], 3, { min: 75, max: 90 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('第 3 轮仍需维持 SkiErg 与 Sled 的目标输出；若多方向弓步先造成局部下肢失败，则该负荷或动作量不合格。'),
+    coachNoteIncludes: ['减少动作幅度', '减少每侧距离', '使用 20m 版本'],
+    planningTime: frozenPlanning({ min: 420, max: 540 }, { min: 45, max: 65 }),
+    calculatedTime: { min: 28.75, max: 39.75 },
   },
   {
-    templateId: 'con5', level: 'l1', primaryGoal: 'Hybrid Foundation',
-    prepKeys: ['row-erg', 'thoracic-rotation', 'kb-hinge', 'light-sled-push'],
-    specificBuildUpKeys: ['row-erg-build', 'sled-push-build', 'kb-deadlift-build', 'farmer-carry-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 100 }),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 15 }),
-      station('kb-deadlift', 'CONDITIONING', 'hinge', { reps: 8 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 20 }),
-    ]],
+    templateId: 'con5', level: 'l1', primaryGoal: 'Hybrid Foundation', secondaryGoal: '建立低技术、可恢复的混合工作容量。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 60 }, { min: 60, max: 60 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build', 1, { durationSeconds: 20 }, { min: 20, max: 20 }),
+      frozenBuild('sled-push-build', 2, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('kb-deadlift-build', 3, { reps: 4 }, { min: 10, max: 20 }),
+      frozenBuild('farmer-carry-build', 4, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 100 }, { min: 45, max: 75 }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 15 }, { min: 25, max: 45 }),
+      frozenStation('kb-deadlift', 'CONDITIONING', 'hinge', { reps: 8 }, { min: 20, max: 35 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 20 }, { min: 30, max: 50 }),
+    ], 3, { min: 60, max: 75 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('三轮切换顺畅，后两轮不因 KB Deadlift 或 Carry 局部疲劳破坏 RowErg 与 Sled 输出。'),
+    coachNoteIncludes: ['降低 KB 或 Carry 负荷', '降低负荷', '延长站点转换'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 45, max: 85 }),
+    calculatedTime: { min: 22.50, max: 32.83 },
   },
   {
-    templateId: 'con5', level: 'l2', primaryGoal: 'Repeat Hybrid Work',
-    prepKeys: ['row-erg', 'thoracic-rotation', 'kb-hinge', 'light-sled-push'],
-    specificBuildUpKeys: ['row-erg-build', 'sled-push-build', 'kb-rdl-build', 'farmer-carry-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 125 }),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }),
-      station('kb-rdl', 'CONDITIONING', 'hinge', { reps: { min: 8, max: 10 } }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 25 }),
-    ]],
+    templateId: 'con5', level: 'l2', primaryGoal: 'Repeat Hybrid Work', secondaryGoal: '保持每轮完成时间和 RowErg 输出稳定。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 75 }, { min: 75, max: 75 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build', 1, { durationSeconds: 25 }, { min: 25, max: 25 }),
+      frozenBuild('sled-push-build', 2, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('kb-rdl-build', 3, { reps: 4 }, { min: 15, max: 25 }),
+      frozenBuild('farmer-carry-build', 4, { distanceMeters: 10 }, { min: 15, max: 25 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 125 }, { min: 60, max: 90 }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+      frozenStation('kb-rdl', 'CONDITIONING', 'hinge', { reps: { min: 8, max: 10 } }, { min: 25, max: 50 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 25 }, { min: 40, max: 60 }),
+    ], 3, 60, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('第 3 轮完成时间不应明显长于前两轮；KB RDL 不得先于整体输出成为限制因素。'),
+    coachNoteIncludes: ['降低 KB RDL', '降低雪橇负荷', '降低负荷'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 60, max: 105 }),
+    calculatedTime: { min: 25.17, max: 35.58 },
   },
   {
-    templateId: 'con5', level: 'l3', primaryGoal: 'Sustain Hybrid Output',
-    prepKeys: ['row-erg', 'thoracic-rotation', 'kb-hinge', 'light-sled-push'],
-    specificBuildUpKeys: ['row-erg-build', 'sled-push-build', 'kb-rdl-build', 'farmer-carry-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [3], stations: [[
-      station('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 150 }),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }),
-      station('kb-rdl', 'CONDITIONING', 'hinge', { reps: 10 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }),
-    ]],
+    templateId: 'con5', level: 'l3', primaryGoal: 'Sustain Hybrid Output', secondaryGoal: '在合法 3–4 轮范围内维持每轮完成时间和器械输出。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build', 1, { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenBuild('sled-push-build', 2, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('kb-rdl-build', 3, { reps: 5 }, { min: 15, max: 25 }),
+      frozenBuild('farmer-carry-build', 4, { distanceMeters: 15 }, { min: 20, max: 30 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 150 }, { min: 75, max: 105 }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+      frozenStation('kb-rdl', 'CONDITIONING', 'hinge', { reps: 10 }, { min: 30, max: 50 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }, { min: 50, max: 75 }),
+    ], 3, { min: 60, max: 75 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('第 4 轮只有在前三轮输出稳定、Recovery 足够、动作技术可接受时才执行；第 4 轮不以单纯增加疲劳为目的。'),
+    coachNoteIncludes: ['只完成标准 3 轮', '不进入第 4 轮', '保持 3 轮'],
+    planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 60, max: 115 }),
+    calculatedTime: { min: 27.08, max: 46.00 },
+    scenarios: [
+      {
+        name: 'Standard 3 rounds',
+        selection: {},
+        prep: [
+          frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+          frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+        ],
+        specificBuildUp: [
+          frozenBuild('row-erg-build', 1, { durationSeconds: 30 }, { min: 30, max: 30 }),
+          frozenBuild('sled-push-build', 2, { distanceMeters: 10 }, { min: 15, max: 25 }),
+          frozenBuild('kb-rdl-build', 3, { reps: 5 }, { min: 15, max: 25 }),
+          frozenBuild('farmer-carry-build', 4, { distanceMeters: 15 }, { min: 20, max: 30 }),
+        ],
+        planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 60, max: 115 }),
+        blocks: [conditioningBlockManifest([
+          frozenStation('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 150 }, { min: 75, max: 105 }),
+          frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+          frozenStation('kb-rdl', 'CONDITIONING', 'hinge', { reps: 10 }, { min: 30, max: 50 }),
+          frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }, { min: 50, max: 75 }),
+        ], 3, { min: 60, max: 75 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+        calculatedTime: { min: 27.08, max: 38.17 },
+      },
+      {
+        name: 'Conditional 4 rounds',
+        selection: { conditioningRounds: { 'conditioning-main': 4 } },
+        prep: [
+          frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+          frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+          frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+        ],
+        specificBuildUp: [
+          frozenBuild('row-erg-build', 1, { durationSeconds: 30 }, { min: 30, max: 30 }),
+          frozenBuild('sled-push-build', 2, { distanceMeters: 10 }, { min: 15, max: 25 }),
+          frozenBuild('kb-rdl-build', 3, { reps: 5 }, { min: 15, max: 25 }),
+          frozenBuild('farmer-carry-build', 4, { distanceMeters: 15 }, { min: 20, max: 30 }),
+        ],
+        planningTime: frozenPlanning({ min: 360, max: 480 }, { min: 60, max: 115 }),
+        blocks: [conditioningBlockManifest([
+          frozenStation('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 150 }, { min: 75, max: 105 }),
+          frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: 20 }, { min: 35, max: 55 }),
+          frozenStation('kb-rdl', 'CONDITIONING', 'hinge', { reps: 10 }, { min: 30, max: 50 }),
+          frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }, { min: 50, max: 75 }),
+        ], 4, { min: 60, max: 75 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+        calculatedTime: { min: 32.50, max: 46.00 },
+      },
+    ],
   },
   {
-    templateId: 'con5', level: 'l4', primaryGoal: 'High Hybrid Repeatability',
-    prepKeys: ['row-erg', 'thoracic-rotation', 'kb-hinge', 'light-sled-push'],
-    specificBuildUpKeys: ['row-erg-build', 'sled-push-build', 'kb-rdl-build', 'farmer-carry-build'], blockKinds: ['conditioning'], blockIds: ['conditioning-main'],
-    rounds: [4], stations: [[
-      station('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 150 }),
-      station('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: { min: 20, max: 25 } }),
-      station('kb-rdl', 'CONDITIONING', 'hinge', { reps: 8 }),
-      station('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }),
-    ]],
+    templateId: 'con5', level: 'l4', primaryGoal: 'High Hybrid Repeatability', secondaryGoal: '让后两轮仍然保持可比较的完成时间、Erg 输出和 Sled split。',
+    prep: [
+      frozenPrep('row-erg', 'R', { durationSeconds: 90 }, { min: 90, max: 90 }),
+      frozenPrep('side-lying-open-book', 'M', { reps: 4 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('dead-bug', 'A', { reps: 5 }, { min: 45, max: 60 }, 'unilateral'),
+      frozenPrep('wall-hip-hinge', 'P', { reps: 6 }, { min: 45, max: 60 }),
+    ],
+    specificBuildUp: [
+      frozenBuild('row-erg-build', 1, { durationSeconds: 30 }, { min: 30, max: 30 }),
+      frozenBuild('sled-push-build', 2, { distanceMeters: 10 }, { min: 15, max: 25 }),
+      frozenBuild('kb-rdl-build', 3, { reps: 4 }, { min: 15, max: 25 }),
+      frozenBuild('farmer-carry-build', 4, { distanceMeters: 15 }, { min: 20, max: 30 }),
+    ],
+    blocks: [conditioningBlockManifest([
+      frozenStation('row-erg', 'CONDITIONING', 'hpull', { distanceMeters: 150 }, { min: 75, max: 105 }),
+      frozenStation('sled-push', 'CONDITIONING', 'hpush', { distanceMeters: { min: 20, max: 25 } }, { min: 35, max: 65 }),
+      frozenStation('kb-rdl', 'CONDITIONING', 'hinge', { reps: 8 }, { min: 25, max: 40 }),
+      frozenStation('farmer-carry', 'CARRY', 'carry', { distanceMeters: 30 }, { min: 50, max: 75 }),
+    ], 4, { min: 75, max: 90 }, { min: 20, max: 30 }, { min: 15, max: 20 })],
+    outputStability: frozenOutputStability('L4 的重点是第 3、4 轮仍可与前两轮比较。首轮更快但后两轮明显崩盘，不符合目标。'),
+    coachNoteIncludes: ['降低 KB RDL', '使用 20m 版本', '不增加复杂度'],
+    planningTime: frozenPlanning({ min: 420, max: 540 }, { min: 55, max: 110 }),
+    calculatedTime: { min: 33.83, max: 47.67 },
   },
 ]
 
-const frozenCalculatedSessionTimes: Record<string, NumericRange> = {
-  'con1/l1': { min: 17.42, max: 23.00 },
-  'con1/l2': { min: 18.00, max: 23.58 },
-  'con1/l3': { min: 17.67, max: 23.25 },
-  'con1/l4': { min: 21.67, max: 27.42 },
-  'con2/l1': { min: 14.08, max: 21.08 },
-  'con2/l2': { min: 14.58, max: 21.08 },
-  'con2/l3': { min: 17.17, max: 25.00 },
-  'con2/l4': { min: 17.92, max: 25.75 },
-  'con3/l1': { min: 17.75, max: 24.42 },
-  'con3/l2': { min: 19.00, max: 25.75 },
-  'con3/l3': { min: 17.67, max: 24.83 },
-  'con3/l4': { min: 18.92, max: 26.08 },
-  'con4/l1': { min: 18.92, max: 28.58 },
-  'con4/l2': { min: 19.42, max: 28.58 },
-  'con4/l3': { min: 20.42, max: 30.08 },
-  'con4/l4': { min: 21.67, max: 31.33 },
-  'con5/l1': { min: 19.50, max: 30.17 },
-  'con5/l2': { min: 19.50, max: 29.67 },
-  'con5/l3': { min: 19.50, max: 30.17 },
-  'con5/l4': { min: 23.92, max: 36.50 },
-}
+const frozenCalculatedSessionTimes: Record<string, NumericRange> = Object.fromEntries(
+  frozenConditioningManifest.map((manifest) => [manifest.templateId + '/' + manifest.level, manifest.calculatedTime]),
+)
 
 describe('conditioning Programming type contract', () => {
   it('accepts the conditioning system and conditioning block kind', () => {
@@ -1095,26 +1595,61 @@ describe('conditioning component time estimator', () => {
   })
 })
 
+const frozenPrepSignature = (item: PrepItem) => ({
+  exerciseKey: item.exerciseKey,
+  phase: item.phase,
+  prescription: item.prescription,
+  planningExecutionSeconds: item.planningExecutionSeconds,
+  laterality: item.laterality ?? 'bilateral',
+})
+
+const frozenBuildSignature = (item: SpecificBuildUpItem) => ({
+  exerciseKey: item.exerciseKey,
+  order: item.order,
+  prescription: item.prescription,
+  planningExecutionSeconds: item.planningExecutionSeconds,
+  ...(item.laterality ? { laterality: item.laterality } : {}),
+  ...(item.sideExecution ? { sideExecution: item.sideExecution } : {}),
+  ...(item.sideRestSeconds !== undefined ? { sideRestSeconds: item.sideRestSeconds } : {}),
+  ...(item.restAfterSeconds !== undefined ? { restAfterSeconds: item.restAfterSeconds } : {}),
+  ...(item.transitionAfterSeconds !== undefined ? { transitionAfterSeconds: item.transitionAfterSeconds } : {}),
+})
+
 const frozenEntrySignature = (entry: TrainingBlock['exercises'][number]) => {
-  if (isPowerTrackSlot(entry)) {
-    return {
-      exerciseKey: entry.exerciseKey,
-      role: entry.role,
-      movementPattern: entry.movementPattern,
-      laterality: entry.laterality,
-      prescription: entry.prescription,
-    }
-  }
-  if (!isTrainingExercise(entry)) {
-    return { kind: entry.kind }
-  }
+  expect(isTrainingExercise(entry)).toBe(true)
+  if (!isTrainingExercise(entry)) return null
   return {
     exerciseKey: entry.exerciseKey,
     role: entry.role,
     movementPattern: entry.movementPattern,
     laterality: entry.laterality,
     prescription: entry.prescription,
+    planningExecutionSeconds: entry.planningExecutionSeconds,
+    ...(entry.sideExecution ? { sideExecution: entry.sideExecution } : {}),
+    ...(entry.sideRestSeconds !== undefined ? { sideRestSeconds: entry.sideRestSeconds } : {}),
+    ...(entry.startingSidePolicy ? { startingSidePolicy: entry.startingSidePolicy } : {}),
+    ...(entry.restSeconds !== undefined ? { restSeconds: entry.restSeconds } : {}),
   }
+}
+
+const frozenBlockSignature = (block: ResolvedTrainingBlock) => ({
+  id: block.id,
+  kind: block.kind,
+  ...(block.rounds !== undefined ? { rounds: block.rounds } : {}),
+  ...(block.restBetweenSetsSeconds !== undefined ? { restBetweenSetsSeconds: block.restBetweenSetsSeconds } : {}),
+  ...(block.restBetweenRoundsSeconds !== undefined ? { restBetweenRoundsSeconds: block.restBetweenRoundsSeconds } : {}),
+  ...(block.transitionSeconds !== undefined ? { transitionSeconds: block.transitionSeconds } : {}),
+  ...(block.transitionBetweenRoundsSeconds !== undefined ? { transitionBetweenRoundsSeconds: block.transitionBetweenRoundsSeconds } : {}),
+  ...(block.transitionAfterSeconds !== undefined ? { transitionAfterSeconds: block.transitionAfterSeconds } : {}),
+  stations: block.exercises.map(frozenEntrySignature),
+})
+
+const frozenOutputManifest: Record<string, { primary: string; supporting: string[] }> = {
+  con1: { primary: 'work-bout-distance', supporting: ['pace', 'power'] },
+  con2: { primary: 'sled-split-time', supporting: ['carry-load', 'carry-distance', 'completion-time'] },
+  con3: { primary: 'power-quality', supporting: ['explosive-reps', 'velocity', 'throw-distance'] },
+  con4: { primary: 'erg-output', supporting: ['sled-split-time', 'locomotion-quality'] },
+  con5: { primary: 'round-completion-time', supporting: ['erg-output', 'sled-split-time'] },
 }
 
 describe('Frozen CON 20-level manifest', () => {
@@ -1134,15 +1669,50 @@ describe('Frozen CON 20-level manifest', () => {
     const level = template?.levels[expected.level]
     expect(level).toBeDefined()
     expect(level?.primaryGoal).toBe(expected.primaryGoal)
-    expect(level?.prep.map((item) => item.exerciseKey)).toEqual(expected.prepKeys)
-    expect(level?.prep.map((item) => item.phase)).toEqual(['R', 'M', 'A', 'P'])
+    expect(level?.secondaryGoal).toBe(expected.secondaryGoal)
     expect(level?.rampUp).toEqual([])
-    expect(level?.specificBuildUp?.map((item) => item.exerciseKey)).toEqual(expected.specificBuildUpKeys)
-    expect(level?.blocks.map((block) => block.kind)).toEqual(expected.blockKinds)
-    expect(level?.blocks.map((block) => block.id)).toEqual(expected.blockIds)
-    expect(level?.blocks.map((block) => block.rounds)).toEqual(expected.rounds)
-    expect(level?.blocks.map((block) => block.exercises.map(frozenEntrySignature))).toEqual(expected.stations)
+    expect(level?.outputPlan?.primary.kind).toBe(frozenOutputManifest[expected.templateId].primary)
+    expect(level?.outputPlan?.supporting?.map((metric) => metric.kind)).toEqual(frozenOutputManifest[expected.templateId].supporting)
+    expect(level?.outputPlan?.outputStability.description).toBe(expected.outputStability)
+    for (const phrase of expected.coachNoteIncludes) expect(level?.coachNote).toContain(phrase)
+
+    const defaultScenario = expected.scenarios?.[0]
+    const resolved = resolveProgrammingLevel(level!, defaultScenario?.selection ?? {})
+    const expectedPrep = defaultScenario?.prep ?? expected.prep
+    const expectedBuild = defaultScenario?.specificBuildUp ?? expected.specificBuildUp
+    const expectedBlocks = defaultScenario?.blocks ?? expected.blocks
+    expect(resolved.planningTime).toEqual(defaultScenario?.planningTime ?? expected.planningTime)
+    expect(resolved.prep.map(frozenPrepSignature)).toEqual(expectedPrep)
+    expect(resolved.specificBuildUp?.map(frozenBuildSignature)).toEqual(expectedBuild)
+    expect(resolved.blocks.map(frozenBlockSignature)).toEqual(expectedBlocks.map((block) => ({
+      ...block,
+      stations: block.stations,
+    })))
   })
+
+  it.each(frozenConditioningManifest.filter((manifest) => (manifest.scenarios?.length ?? 0) > 0))(
+    '$templateId $level resolves every independent legal Power path from the frozen manifest',
+    (expected) => {
+      const level = conditioningTemplates.find((candidate) => candidate.id === expected.templateId)!.levels[expected.level]
+      for (const scenario of expected.scenarios ?? []) {
+        const resolved = resolveProgrammingLevel(level, scenario.selection)
+        expect(resolved.planningTime).toEqual(scenario.planningTime ?? expected.planningTime)
+        expect(resolved.prep.map(frozenPrepSignature)).toEqual(scenario.prep)
+        expect(resolved.specificBuildUp?.map(frozenBuildSignature)).toEqual(scenario.specificBuildUp)
+        if (scenario.powerExercise) {
+          expect(resolved.blocks[0]?.exercises.map(frozenEntrySignature)).toEqual([
+            scenario.powerExercise,
+          ])
+          expect(resolved.blocks[1]?.exercises.map(frozenEntrySignature)).toEqual(expected.blocks[1]?.stations)
+        } else {
+          expect(resolved.blocks.map(frozenBlockSignature)).toEqual((scenario.blocks ?? expected.blocks).map((block) => ({
+            ...block,
+            stations: block.stations,
+          })))
+        }
+      }
+    },
+  )
 
   it('locks every Prep, Build-up, and work item to an explicit planning range and prescription', () => {
     for (const template of conditioningTemplates) {
@@ -1182,15 +1752,25 @@ describe('Frozen CON 20-level manifest', () => {
     expect(auditConditioningTemplateSet(conditioningTemplates)).toEqual([])
   })
 
-  it('matches the independently snapshotted calculated session range for every level', () => {
-    for (const template of conditioningTemplates) {
-      for (const [levelKey, level] of Object.entries(template.levels)) {
-        const expected = frozenCalculatedSessionTimes[template.id + '/' + levelKey]
-        const actual = estimateSessionMinutes(level).totalMinutes
-        expect(actual.min).toBeCloseTo(expected.min, 1)
-        expect(actual.max).toBeCloseTo(expected.max, 1)
-        expect(actual.max).toBeLessThanOrEqual(60)
-        expect(level.estimatedMinutes.max).toBeGreaterThanOrEqual(actual.max)
+  it('matches the independently snapshotted calculated session range for every default level', () => {
+    for (const expected of frozenConditioningManifest) {
+      const level = conditioningTemplates.find((template) => template.id === expected.templateId)!.levels[expected.level]
+      const scenarioEstimates = expected.scenarios?.map((scenario) => (
+        estimateSessionMinutes(level, scenario.selection).totalMinutes
+      )) ?? [estimateSessionMinutes(level).totalMinutes]
+      const actual = {
+        min: Math.min(...scenarioEstimates.map((estimate) => estimate.min)),
+        max: Math.max(...scenarioEstimates.map((estimate) => estimate.max)),
+      }
+      expect(actual.min).toBeCloseTo(expected.calculatedTime.min, 1)
+      expect(actual.max).toBeCloseTo(expected.calculatedTime.max, 1)
+      expect(actual.max).toBeLessThanOrEqual(60)
+      expect(level.estimatedMinutes.max).toBeGreaterThanOrEqual(actual.max)
+      for (const scenario of expected.scenarios ?? []) {
+        const path = estimateSessionMinutes(level, scenario.selection).totalMinutes
+        expect(path.min).toBeCloseTo(scenario.calculatedTime.min, 1)
+        expect(path.max).toBeCloseTo(scenario.calculatedTime.max, 1)
+        expect(path.max).toBeLessThanOrEqual(60)
       }
     }
   })
@@ -1224,7 +1804,7 @@ describe('Frozen CON 20-level manifest', () => {
     expect(isTrainingExercise(stepUp) && stepUp.laterality).toBe('unilateral')
     expect(isTrainingExercise(stepUp) && stepUp.sideExecution).toBe('alternating')
     expect(isTrainingExercise(lateralCrawl) && lateralCrawl.sideExecution).toBe('one-side-then-opposite')
-    expect(isTrainingExercise(lateralCrawl) && lateralCrawl.sideRestSeconds).toEqual(10)
+    expect(isTrainingExercise(lateralCrawl) && lateralCrawl.sideRestSeconds).toEqual({ min: 10, max: 15 })
     expect(isPowerTrackSlot(powerSlot)).toBe(true)
     if (isPowerTrackSlot(powerSlot)) {
       const throwPath = powerSlot.options.find((option) => option.optionKey === 'rotational-throw')!
@@ -1245,7 +1825,7 @@ describe('Frozen CON 20-level manifest', () => {
     if (isPowerTrackSlot(l3Slot) && isPowerTrackSlot(l4Slot)) {
       expect(l3Slot.options.map((option) => option.optionKey)).toEqual(['kb-swing', 'medicine-ball-slam'])
       expect(l4Slot.options.map((option) => option.optionKey)).toEqual(['kb-swing', 'rotational-throw'])
-      expect(l3Slot.foundationRegression).toBeDefined()
+      expect(l3Slot.foundationRegression).toBeUndefined()
       expect(l4Slot.foundationRegression).toBeDefined()
       expect(l3Slot.options.some((option) => option.optionKey === 'foundation-regression')).toBe(false)
       expect(l4Slot.options.some((option) => option.optionKey === 'foundation-regression')).toBe(false)
@@ -1261,6 +1841,14 @@ describe('Frozen CON 20-level manifest', () => {
     })
   })
 
+  it('keeps CON03 L1 and L2 on fixed Power prescriptions, not selectable tracks', () => {
+    const con3 = conditioningTemplates.find((template) => template.id === 'con3')!
+    expect(isPowerTrackSlot(con3.levels.l1.blocks[0].exercises[0])).toBe(false)
+    expect(isPowerTrackSlot(con3.levels.l2.blocks[0].exercises[0])).toBe(false)
+    expect(isTrainingExercise(con3.levels.l1.blocks[0].exercises[0])).toBe(true)
+    expect(isTrainingExercise(con3.levels.l2.blocks[0].exercises[0])).toBe(true)
+  })
+
   it('resolves and times every legal CON03 L3 and L4 path independently', () => {
     const con3 = conditioningTemplates.find((template) => template.id === 'con3')!
     const l3 = con3.levels.l3
@@ -1270,8 +1858,8 @@ describe('Frozen CON 20-level manifest', () => {
     const l3Swing = estimateSessionMinutes(l3, {
       powerTracks: { 'con3-l3-power': { optionKey: 'kb-swing', techniqueReady: true } },
     })
-    expect(l3Medicine.conditioningComponentsSeconds!.powerWork).toEqual({ min: 45, max: 60 })
-    expect(l3Swing.conditioningComponentsSeconds!.powerWork).toEqual({ min: 100, max: 125 })
+    expect(l3Medicine.conditioningComponentsSeconds!.powerWork).toEqual({ min: 40, max: 80 })
+    expect(l3Swing.conditioningComponentsSeconds!.powerWork).toEqual({ min: 75, max: 125 })
     expect(l3Swing.totalMinutes.min).toBeGreaterThan(l3Medicine.totalMinutes.min)
     expect(l3Swing.totalMinutes.max).toBeGreaterThan(l3Medicine.totalMinutes.max)
 
@@ -1282,9 +1870,9 @@ describe('Frozen CON 20-level manifest', () => {
     const l4Rotational = estimateSessionMinutes(l4, {
       powerTracks: { 'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true } },
     })
-    expect(l4Foundation.conditioningComponentsSeconds!.powerWork).toEqual({ min: 45, max: 60 })
-    expect(l4Swing.conditioningComponentsSeconds!.powerWork).toEqual({ min: 100, max: 125 })
-    expect(l4Rotational.conditioningComponentsSeconds!.powerWork).toEqual({ min: 120, max: 160 })
+    expect(l4Foundation.conditioningComponentsSeconds!.powerWork).toEqual({ min: 40, max: 80 })
+    expect(l4Swing.conditioningComponentsSeconds!.powerWork).toEqual({ min: 75, max: 125 })
+    expect(l4Rotational.conditioningComponentsSeconds!.powerWork).toEqual({ min: 120, max: 200 })
     expect(l4Rotational.conditioningComponentsSeconds!.unilateralReset).toEqual({ min: 60, max: 80 })
     expect(l4Rotational.totalMinutes.max).toBeGreaterThan(l4Foundation.totalMinutes.max)
   })
@@ -1295,8 +1883,8 @@ describe('Frozen CON 20-level manifest', () => {
     const conditional = estimateSessionMinutes(l3, {
       conditioningRounds: { 'conditioning-main': 4 },
     })
-    expect(standard.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 255, max: 450 })
-    expect(conditional.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 340, max: 600 })
+    expect(standard.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 570, max: 855 })
+    expect(conditional.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 760, max: 1140 })
     expect(conditional.totalMinutes.max).toBeGreaterThan(standard.totalMinutes.max)
   })
 
@@ -1315,27 +1903,27 @@ describe('Frozen CON 20-level manifest', () => {
       powerTracks: { 'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true } },
     }).totalMinutes
 
-    expect(l3Medicine.min).toBeCloseTo(17.67, 1)
-    expect(l3Medicine.max).toBeCloseTo(24.83, 1)
-    expect(l3Swing.min).toBeCloseTo(20.58, 1)
-    expect(l3Swing.max).toBeCloseTo(28.42, 1)
+    expect(l3Medicine.min).toBeCloseTo(20.52, 1)
+    expect(l3Medicine.max).toBeCloseTo(29.00, 1)
+    expect(l3Swing.min).toBeCloseTo(22.10, 1)
+    expect(l3Swing.max).toBeCloseTo(31.00, 1)
     expect({ min: Math.min(l3Medicine.min, l3Swing.min), max: Math.max(l3Medicine.max, l3Swing.max) }).toEqual({
-      min: expect.closeTo(17.67, 1),
-      max: expect.closeTo(28.42, 1),
+      min: expect.closeTo(20.52, 1),
+      max: expect.closeTo(31.00, 1),
     })
 
-    expect(l4Foundation.min).toBeCloseTo(18.92, 1)
-    expect(l4Foundation.max).toBeCloseTo(26.08, 1)
-    expect(l4Swing.min).toBeCloseTo(22.33, 1)
-    expect(l4Swing.max).toBeCloseTo(30.17, 1)
-    expect(l4Rotational.min).toBeCloseTo(22.42, 1)
-    expect(l4Rotational.max).toBeCloseTo(30.58, 1)
+    expect(l4Foundation.min).toBeCloseTo(22.43, 1)
+    expect(l4Foundation.max).toBeCloseTo(29.50, 1)
+    expect(l4Swing.min).toBeCloseTo(25.02, 1)
+    expect(l4Swing.max).toBeCloseTo(33.25, 1)
+    expect(l4Rotational.min).toBeCloseTo(25.52, 1)
+    expect(l4Rotational.max).toBeCloseTo(34.75, 1)
     expect({
       min: Math.min(l4Foundation.min, l4Swing.min, l4Rotational.min),
       max: Math.max(l4Foundation.max, l4Swing.max, l4Rotational.max),
     }).toEqual({
-      min: expect.closeTo(18.92, 1),
-      max: expect.closeTo(30.58, 1),
+      min: expect.closeTo(22.43, 1),
+      max: expect.closeTo(34.75, 1),
     })
   })
 
@@ -1488,6 +2076,75 @@ describe('conditioning resolver', () => {
     expect(() => resolveProgrammingLevel(l3ResolverFixture, {
       conditioningRounds: { 'conditioning-main': 5 },
     })).toThrow(/approved policy/i)
+    expect(() => resolveProgrammingLevel(l3ResolverFixture, {
+      conditioningRounds: { 'conditioning-main': 3 },
+    })).toThrow(/approved policy/i)
+  })
+
+  it('audits every legal CON03 path and both CON05 L3 round scenarios', () => {
+    const issues = auditConditioningTemplateSet(conditioningTemplates)
+    expect(issues.filter((entry) => entry.code === 'TIME_OVER_BUDGET')).toEqual([])
+
+    const con3 = conditioningTemplates.find((template) => template.id === 'con3')!
+    const con5 = conditioningTemplates.find((template) => template.id === 'con5')!
+    const scenarios = [
+      [con3.levels.l3, {}],
+      [con3.levels.l3, { powerTracks: { 'con3-l3-power': { optionKey: 'kb-swing', techniqueReady: true } } }],
+      [con3.levels.l4, {}],
+      [con3.levels.l4, { powerTracks: { 'con3-l4-power': { optionKey: 'kb-swing', techniqueReady: true } } }],
+      [con3.levels.l4, { powerTracks: { 'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true } } }],
+      [con5.levels.l3, {}],
+      [con5.levels.l3, { conditioningRounds: { 'conditioning-main': 4 } }],
+    ] as const
+
+    for (const [level, selection] of scenarios) {
+      expect(estimateSessionMinutes(level, selection).totalMinutes.max).toBeLessThanOrEqual(60)
+    }
+  })
+
+  it('hard-audits a mutated legal path instead of checking only the default scenario', () => {
+    const con3 = conditioningTemplates.find((template) => template.id === 'con3')!
+    const l4 = con3.levels.l4
+    const powerSlot = l4.blocks[0].exercises[0]
+    expect(isPowerTrackSlot(powerSlot)).toBe(true)
+    if (!isPowerTrackSlot(powerSlot)) return
+
+    const mutatedPowerSlot: PowerTrackSlot = {
+      ...powerSlot,
+      options: powerSlot.options.map((option) => option.optionKey === 'kb-swing'
+        ? {
+          ...option,
+          path: {
+            ...option.path,
+            powerExercise: {
+              ...option.path.powerExercise,
+              planningExecutionSeconds: { min: 2000, max: 2000 },
+            },
+          },
+        }
+        : option),
+    }
+    const mutatedTemplates = conditioningTemplates.map((template) => template.id === 'con3'
+      ? {
+        ...template,
+        levels: {
+          ...template.levels,
+          l4: {
+            ...l4,
+            blocks: l4.blocks.map((block, index) => index === 0
+              ? { ...block, exercises: [mutatedPowerSlot] }
+              : block),
+          },
+        },
+      }
+      : template)
+
+    expect(auditConditioningTemplateSet(mutatedTemplates)).toContainEqual(
+      expect.objectContaining({
+        code: 'TIME_OVER_BUDGET',
+        path: expect.stringContaining('con3/l4/scenario-swing-track'),
+      }),
+    )
   })
 
   it('does not add Power Track fields to BODY resolved levels', () => {

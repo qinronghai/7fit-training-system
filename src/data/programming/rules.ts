@@ -46,6 +46,8 @@ const addRange = (left: NumericRange, right: NumericRange): NumericRange => ({
   max: left.max + right.max,
 })
 
+const roundMinutes = (seconds: number): number => Math.round((seconds / 60) * 100) / 100
+
 const multiplyRange = (value: NumericRange, multiplier: NumericRange | number): NumericRange => {
   if (typeof multiplier === 'number') {
     return { min: value.min * multiplier, max: value.max * multiplier }
@@ -280,6 +282,7 @@ export const resolveProgrammingLevel = (
   let complementaryIncluded = false
   let effectivePrep = level.prep
   let effectiveSpecificBuildUp = level.specificBuildUp
+  let effectivePlanningTime = level.planningTime
   const blocks = level.blocks.map((block, blockIndex) => {
     const exercises: TrainingExercise[] = []
     block.exercises.forEach((entry, entryIndex) => {
@@ -305,6 +308,12 @@ export const resolveProgrammingLevel = (
         }
         effectivePrep = resolvedPowerTrack.path.prep.map((item) => ({ ...item }))
         effectiveSpecificBuildUp = resolvedPowerTrack.path.specificBuildUp.map((item) => ({ ...item }))
+        if (resolvedPowerTrack.path.planningTime) {
+          effectivePlanningTime = {
+            ...(effectivePlanningTime ?? { setupCoachingAllowanceSeconds: { min: 0, max: 0 } }),
+            ...resolvedPowerTrack.path.planningTime,
+          }
+        }
         powerTrackSelections[entry.id] = {
           ...(resolvedPowerTrack.requestedOptionKey
             ? { requestedOptionKey: resolvedPowerTrack.requestedOptionKey }
@@ -324,11 +333,10 @@ export const resolveProgrammingLevel = (
       if (!block.roundPolicy) {
         throw new Error('conditioningRounds.' + block.id + ': this block has no conditional round policy')
       }
-      const standardRounds = block.roundPolicy.standardRounds
-      const maximumRounds = block.roundPolicy.conditionalMaxRounds ?? standardRounds
+      const maximumRounds = block.roundPolicy.conditionalMaxRounds
       if (!Number.isInteger(selectedRounds)
-        || selectedRounds !== standardRounds
-        && selectedRounds !== maximumRounds) {
+        || maximumRounds === undefined
+        || selectedRounds !== maximumRounds) {
         throw new Error('conditioningRounds.' + block.id + ': selected rounds are outside the approved policy')
       }
       return { ...block, rounds: selectedRounds, exercises }
@@ -340,6 +348,7 @@ export const resolveProgrammingLevel = (
     ...level,
     prep: effectivePrep,
     ...(effectiveSpecificBuildUp ? { specificBuildUp: effectiveSpecificBuildUp } : {}),
+    ...(effectivePlanningTime ? { planningTime: effectivePlanningTime } : {}),
     blocks,
     exercises: blocks.flatMap((block) => block.exercises),
     selections,
@@ -994,6 +1003,7 @@ const validateConditioningMetadata = (
 
 export const auditConditioningTemplateLevel = (
   level: ProgrammingTemplateLevel,
+  selection?: ProgrammingSelection,
 ): AuditIssue[] => {
   const issues = auditSharedTemplateLevel(level, {
     requirePrimaryRole: false,
@@ -1004,7 +1014,8 @@ export const auditConditioningTemplateLevel = (
   validateConditioningMetadata(level, issues)
 
   try {
-    const estimate = estimateSessionMinutes(level)
+    const resolved = resolvedLevelFor(level, selection)
+    const estimate = estimateSessionMinutes(resolved)
     const calculatedMax = estimate.totalMinutes.max
     if (calculatedMax > 60) {
       issues.push(issue(
@@ -1594,10 +1605,54 @@ export const auditConditioningTemplateSet = (
         issues.push(issue('LEVEL_SET', template.id, 'Template level is missing.'))
         return
       }
-      auditConditioningTemplateLevel(level).forEach((levelIssue) => {
-        issues.push({
-          ...levelIssue,
-          path: template.id + '/' + level.programLevel + '/' + levelIssue.path,
+      const selections: Array<{ name: string; selection: ProgrammingSelection }> = [
+        { name: 'default', selection: {} },
+      ]
+      if (template.id === 'con3' && level.programLevel === 'l3') {
+        selections.push({
+          name: 'swing-track',
+          selection: {
+            powerTracks: {
+              'con3-l3-power': { optionKey: 'kb-swing', techniqueReady: true },
+            },
+          },
+        })
+      }
+      if (template.id === 'con3' && level.programLevel === 'l4') {
+        selections.push(
+          {
+            name: 'swing-track',
+            selection: {
+              powerTracks: {
+                'con3-l4-power': { optionKey: 'kb-swing', techniqueReady: true },
+              },
+            },
+          },
+          {
+            name: 'rotational-track',
+            selection: {
+              powerTracks: {
+                'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true },
+              },
+            },
+          },
+        )
+      }
+      if (template.id === 'con5' && level.programLevel === 'l3') {
+        selections.push({
+          name: 'conditional-four-round',
+          selection: { conditioningRounds: { 'conditioning-main': 4 } },
+        })
+      }
+
+      selections.forEach(({ name, selection }, scenarioIndex) => {
+        auditConditioningTemplateLevel(level, selection).forEach((levelIssue) => {
+          issues.push({
+            ...levelIssue,
+            path: template.id + '/' + level.programLevel
+              + (scenarioIndex === 0 ? '' : '/scenario-' + name)
+              + '/' + levelIssue.path,
+          })
         })
       })
     })
@@ -1753,13 +1808,21 @@ const estimateConditioningPrep = (level: ResolvedProgrammingLevel): NumericRange
 const estimateConditioningSpecificBuildUp = (
   level: ResolvedProgrammingLevel,
 ): NumericRange => {
-  const itemTime = sumRanges((level.specificBuildUp ?? []).map((item, index) => addRange(
-    requiredPlanningRange(item.planningExecutionSeconds, 'specificBuildUp[' + index + ']'),
-    addRange(
-      toRange(item.restAfterSeconds),
-      toRange(item.transitionAfterSeconds),
-    ),
-  )))
+  const itemTime = sumRanges((level.specificBuildUp ?? []).map((item, index) => {
+    const planning = requiredPlanningRange(item.planningExecutionSeconds, 'specificBuildUp[' + index + ']')
+    const repetitions = countRange(item.prescription.sets) ?? { min: 1, max: 1 }
+    return addRange(
+      addRange(multiplyRange(planning, repetitions), addRange(
+        toRange(item.restAfterSeconds),
+        toRange(item.transitionAfterSeconds),
+      )),
+      unilateralResetFor(
+        item.laterality ?? 'bilateral',
+        item.sideRestSeconds,
+        { min: 1, max: 1 },
+      ),
+    )
+  }))
   const allowance = toRange(level.planningTime?.buildUpCoachingAllowanceSeconds)
   return addRange(itemTime, allowance)
 }
@@ -1907,11 +1970,6 @@ const estimateConditioningSessionMinutes = (
       item.sideRestSeconds,
       { min: 1, max: 1 },
     )),
-    ...(resolved.specificBuildUp ?? []).map((item) => unilateralResetFor(
-      item.laterality ?? 'bilateral',
-      item.sideRestSeconds,
-      { min: 1, max: 1 },
-    )),
     ...powerBlocks.flatMap((block, blockIndex) => {
       const source = resolved.blocks.filter((candidate) => candidate.kind === 'power')[blockIndex]
       return source
@@ -1965,8 +2023,8 @@ const estimateConditioningSessionMinutes = (
     equipmentBufferMinutes: 0,
     planningOverheadMinutes: setupCoachingAllowance.max / 60,
     totalMinutes: {
-      min: totalSeconds.min / 60,
-      max: totalSeconds.max / 60,
+      min: roundMinutes(totalSeconds.min),
+      max: roundMinutes(totalSeconds.max),
     },
     conditioningComponentsSeconds: components,
   }
