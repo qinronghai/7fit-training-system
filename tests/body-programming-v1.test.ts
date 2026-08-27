@@ -216,6 +216,54 @@ const frozenBodyTargetMuscleSetEstimate: Record<string, Record<string, Count>> =
   'body5/l4': { gluteus: 6, quadriceps: 2, upperBack: 4, lateralDelts: 2, selectedArm: 2 },
 }
 
+const frozenBodyMovementPatternByExerciseKey: Record<string, TrainingExercise['movementPattern']> = {
+  'assisted-pull-up': 'vpull',
+  'barbell-bench-press': 'hpush',
+  'barbell-rdl': 'hinge',
+  'box-squat': 'squat',
+  'cable-fly': 'hpush',
+  'cable-pullover': 'vpull',
+  'chest-supported-row': 'hpull',
+  'double-dumbbell-rdl': 'hinge',
+  'dumbbell-bench-press': 'hpush',
+  'dumbbell-curl': 'hpull',
+  'face-pull': 'hpull',
+  'floor-glute-bridge': 'hip',
+  'goblet-squat': 'squat',
+  'hack-squat': 'squat',
+  'heavy-chest-supported-row': 'hpull',
+  'heavy-hack-squat': 'squat',
+  'heavy-hip-thrust': 'hip',
+  'heavy-overload-hip-thrust': 'hip',
+  'high-kettlebell-deadlift': 'hinge',
+  'hip-abduction': 'hip',
+  'hip-thrust': 'hip',
+  'incline-dumbbell-curl': 'hpull',
+  'incline-dumbbell-press': 'hpush',
+  'incline-push-up': 'hpush',
+  'kettlebell-rdl': 'hinge',
+  'lateral-raise': 'vpush',
+  'leg-extension': 'squat',
+  'low-assistance-pull-up': 'vpull',
+  'machine-chest-press': 'hpush',
+  'machine-lateral-raise': 'vpush',
+  'neutral-grip-lat-pulldown': 'vpull',
+  'overload-hip-thrust': 'hip',
+  'rear-delt-fly': 'hpull',
+  'rope-triceps-pressdown': 'hpush',
+  'seated-dumbbell-shoulder-press': 'vpush',
+  'seated-hip-adduction': 'adduction',
+  'seated-leg-curl': 'hinge',
+  'seated-row': 'hpull',
+  'single-arm-cable-row': 'hpull',
+  'straight-arm-pulldown': 'vpull',
+  'supported-bulgarian-split-squat': 'single',
+  'supported-front-foot-elevated-split-squat': 'single',
+  'supported-low-box-step-up': 'single',
+  'supported-reverse-lunge': 'single',
+  'supported-split-squat': 'single',
+}
+
 describe('BODY shared Programming type guards', () => {
   it('distinguishes selectable slots from real TrainingExercise entries', () => {
     expect(isSelectableExerciseSlot(selectableSlot)).toBe(true)
@@ -585,6 +633,7 @@ describe('BODY Programming V1 frozen source', () => {
       exerciseKey,
       role,
       laterality,
+      movementPattern: frozenBodyMovementPatternByExerciseKey[exerciseKey],
       prescription: { sets, reps, rir },
     })
     const prepExpectation = (exerciseKey: string, phase: PrepPhase, prescription: ExercisePrescription, laterality?: Laterality) => ({
@@ -840,9 +889,10 @@ describe('BODY Programming V1 frozen source', () => {
           ...(laterality ? { laterality } : {}),
         })),
         rampUp: level.rampUp.map(({ exerciseKey, order, reps }) => ({ exerciseKey, order, reps })),
-        exercises: resolved.exercises.filter((exercise) => exercise.optional !== true).map(({ exerciseKey, role, laterality, restSeconds, prescription }) => ({
+        exercises: resolved.exercises.filter((exercise) => exercise.optional !== true).map(({ exerciseKey, role, movementPattern, laterality, restSeconds, prescription }) => ({
           exerciseKey,
           role,
+          movementPattern,
           laterality,
           restSeconds,
           prescription: {
