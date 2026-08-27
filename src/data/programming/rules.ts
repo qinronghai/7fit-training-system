@@ -88,6 +88,25 @@ const VALID_MOVEMENT_PATTERNS = new Set([
   'rotation',
 ])
 
+const VALID_CONDITIONING_OUTPUT_KINDS = new Set([
+  'work-bout-distance',
+  'pace',
+  'power',
+  'erg-output',
+  'sled-split-time',
+  'carry-load',
+  'carry-distance',
+  'completion-time',
+  'round-completion-time',
+  'power-quality',
+  'explosive-reps',
+  'velocity',
+  'throw-distance',
+  'locomotion-quality',
+])
+
+const VALID_CONDITIONING_OUTPUT_SCOPES = new Set(['bout', 'set', 'station', 'round', 'level'])
+
 const issue = (code: string, path: string, message: string): AuditIssue => ({
   code,
   path,
@@ -949,6 +968,15 @@ const validateConditioningMetadata = (
     || level.outputPlan.outputStability?.kind !== 'coach-design-target'
     || !level.outputPlan.outputStability.description.trim()) {
     issues.push(issue('CON_OUTPUT_PLAN', 'outputPlan', 'CON must define output metric metadata and a Coach Design Target.'))
+  } else {
+    const metrics = [level.outputPlan.primary, ...(level.outputPlan.supporting ?? [])]
+    metrics.forEach((metric, index) => {
+      if (!VALID_CONDITIONING_OUTPUT_KINDS.has(metric.kind)
+        || !VALID_CONDITIONING_OUTPUT_SCOPES.has(metric.scope)
+        || (metric.availability !== 'required' && metric.availability !== 'when-available')) {
+        issues.push(issue('CON_OUTPUT_PLAN', 'outputPlan.' + (index === 0 ? 'primary' : 'supporting[' + (index - 1) + ']'), 'CON output metrics must use approved design-only kinds, scopes and availability.'))
+      }
+    })
   }
   if (!level.planningTime || !validPlanningRange(level.planningTime.setupCoachingAllowanceSeconds)) {
     issues.push(issue('CON_PLANNING_TIME', 'planningTime.setupCoachingAllowanceSeconds', 'CON must define a valid session setup/coaching planning range.'))

@@ -707,6 +707,28 @@ describe('conditioning structural audit', () => {
     }
     expect(auditConditioningTemplateLevel(level)).toEqual([])
   })
+
+  it('validates output metric semantics without introducing telemetry requirements', () => {
+    const invalid = makeAuditConditioningLevel()
+    invalid.outputPlan = {
+      ...outputPlan,
+      primary: { kind: 'watts' as never, scope: 'bout', availability: 'required' },
+    }
+    expect(auditConditioningTemplateLevel(invalid)).toContainEqual(
+      expect.objectContaining({ code: 'CON_OUTPUT_PLAN' }),
+    )
+
+    const designOnly = makeAuditConditioningLevel()
+    designOnly.outputPlan = {
+      ...outputPlan,
+      primary: { kind: 'power', scope: 'bout', availability: 'when-available' },
+      outputStability: {
+        kind: 'coach-design-target',
+        description: 'Keep later bouts repeatable; do not use a numeric hard-fail threshold.',
+      },
+    }
+    expect(auditConditioningTemplateLevel(designOnly)).toEqual([])
+  })
 })
 
 describe('conditioning component time estimator', () => {
