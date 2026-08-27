@@ -164,6 +164,58 @@ const bodyFixtureLevel: ProgrammingTemplateLevel = {
   coachNote: 'fixture',
 }
 
+type BodyRestRole = 'PRIMARY' | 'SECONDARY' | 'UNILATERAL' | 'ACCESSORY'
+
+const frozenBodyRestByLevel: Record<ProgramLevel, Record<BodyRestRole, Count>> = {
+  l1: {
+    PRIMARY: 90,
+    SECONDARY: { min: 75, max: 90 },
+    UNILATERAL: { min: 60, max: 75 },
+    ACCESSORY: { min: 45, max: 60 },
+  },
+  l2: {
+    PRIMARY: { min: 90, max: 120 },
+    SECONDARY: 90,
+    UNILATERAL: 75,
+    ACCESSORY: 60,
+  },
+  l3: {
+    PRIMARY: { min: 120, max: 150 },
+    SECONDARY: { min: 90, max: 120 },
+    UNILATERAL: { min: 75, max: 90 },
+    ACCESSORY: 60,
+  },
+  l4: {
+    PRIMARY: { min: 120, max: 150 },
+    SECONDARY: 120,
+    UNILATERAL: 90,
+    ACCESSORY: { min: 60, max: 75 },
+  },
+}
+
+const frozenBodyTargetMuscleSetEstimate: Record<string, Record<string, Count>> = {
+  'body1/l1': { gluteus: 8, quadriceps: 7, hipAbductors: 2 },
+  'body1/l2': { gluteus: 9, quadriceps: 8, hipAbductors: 2 },
+  'body1/l3': { gluteus: 10, quadriceps: 8, hipAbductors: 2 },
+  'body1/l4': { gluteus: 10, quadriceps: 8, hipAbductors: 2 },
+  'body2/l1': { lats: 5, upperBack: 3, rearDelts: 2, biceps: 2 },
+  'body2/l2': { lats: 4, upperBack: 5, rearDelts: 2, biceps: 2 },
+  'body2/l3': { lats: 6, upperBack: 4, rearDelts: 2, biceps: 2 },
+  'body2/l4': { lats: 6, upperBack: 4, rearDelts: 2, biceps: 2 },
+  'body3/l1': { gluteus: 8, hamstrings: 6, quadriceps: 2, hipAdductors: 2 },
+  'body3/l2': { gluteus: 9, hamstrings: 7, quadriceps: 2, hipAdductors: 2 },
+  'body3/l3': { gluteus: 9, hamstrings: 6, quadriceps: 2, hipAdductors: 2 },
+  'body3/l4': { gluteus: 9, hamstrings: 6, quadriceps: 2, hipAdductors: 2 },
+  'body4/l1': { chest: 5, deltoids: 5, triceps: 2 },
+  'body4/l2': { chest: 6, deltoids: 5, triceps: 2 },
+  'body4/l3': { chest: 6, deltoids: 5, triceps: 2 },
+  'body4/l4': { chest: 6, deltoids: 5, triceps: 2 },
+  'body5/l1': { gluteus: 5, quadriceps: 2, lats: 3, lateralDelts: 2, selectedArm: 2 },
+  'body5/l2': { gluteus: 6, quadriceps: 2, upperBack: 3, lateralDelts: 2, selectedArm: 2 },
+  'body5/l3': { gluteus: 6, quadriceps: 2, upperBack: 4, lateralDelts: 2, selectedArm: 2 },
+  'body5/l4': { gluteus: 6, quadriceps: 2, upperBack: 4, lateralDelts: 2, selectedArm: 2 },
+}
+
 describe('BODY shared Programming type guards', () => {
   it('distinguishes selectable slots from real TrainingExercise entries', () => {
     expect(isSelectableExerciseSlot(selectableSlot)).toBe(true)
@@ -637,7 +689,7 @@ describe('BODY Programming V1 frozen source', () => {
       ], [rampExpectation('low-assistance-pull-up', 1, 5), rampExpectation('low-assistance-pull-up', 2, 3), rampExpectation('low-assistance-pull-up', 3, 2)], [
         expectation('low-assistance-pull-up', 'PRIMARY', 'bilateral', 4, r(4, 6), r(1, 2)),
         expectation('heavy-chest-supported-row', 'SECONDARY', 'bilateral', 4, r(6, 8), r(1, 2)),
-        expectation('cable-pulldown', 'ACCESSORY', 'bilateral', 2, r(10, 15), r(1, 2)),
+        expectation('cable-pullover', 'ACCESSORY', 'bilateral', 2, r(10, 15), r(1, 2)),
         expectation('rear-delt-fly', 'ACCESSORY', 'bilateral', 2, r(10, 15), r(1, 2)),
         expectation('incline-dumbbell-curl', 'ACCESSORY', 'bilateral', 2, r(8, 12), r(1, 2)),
       ]),
@@ -788,20 +840,29 @@ describe('BODY Programming V1 frozen source', () => {
           ...(laterality ? { laterality } : {}),
         })),
         rampUp: level.rampUp.map(({ exerciseKey, order, reps }) => ({ exerciseKey, order, reps })),
-        exercises: resolved.exercises.filter((exercise) => exercise.optional !== true).map(({ exerciseKey, role, laterality, prescription }) => ({
+        exercises: resolved.exercises.filter((exercise) => exercise.optional !== true).map(({ exerciseKey, role, laterality, restSeconds, prescription }) => ({
           exerciseKey,
           role,
           laterality,
+          restSeconds,
           prescription: {
             sets: prescription.sets,
             reps: prescription.reps,
             rir: prescription.rir,
           },
         })),
+        targetMuscleSetEstimate: level.targetMuscleSetEstimate,
         alternatives: level.blocks.flatMap((block) => getTrainingExercises(block)).flatMap((exercise) => (exercise.alternatives ?? []).map((alternative) => alternative.exerciseKey)),
       }
 
-      expect(actual, key).toEqual(expected)
+      expect(actual, key).toEqual({
+        ...expected,
+        exercises: expected.exercises.map((exercise) => ({
+          ...exercise,
+          restSeconds: frozenBodyRestByLevel[programLevel][exercise.role as BodyRestRole],
+        })),
+        targetMuscleSetEstimate: frozenBodyTargetMuscleSetEstimate[key],
+      })
     }
   })
 
@@ -819,6 +880,10 @@ describe('BODY Programming V1 frozen source', () => {
         { exerciseKey: 'dumbbell-curl', role: 'ACCESSORY' },
         { exerciseKey: 'rope-triceps-pressdown', role: 'ACCESSORY' },
       ])
+      expect(slot!.options.map((option) => option.restSeconds)).toEqual([
+        frozenBodyRestByLevel[level.programLevel].ACCESSORY,
+        frozenBodyRestByLevel[level.programLevel].ACCESSORY,
+      ])
       expect(resolveProgrammingLevel(level).exercises).toHaveLength(5)
       expect(resolveProgrammingLevel(level, { includeComplementaryOption: true }).exercises).toHaveLength(6)
     }
@@ -832,5 +897,19 @@ describe('BODY Programming V1 frozen source', () => {
     expect(body05.exercises.map((exercise) => exercise.name)).toContain('哑铃弯举')
     expect(body05.exercises.map((exercise) => exercise.name)).not.toContain('绳索三头下压')
     expect(body01.exercises[0].name).toBe('大负荷哈克深蹲')
+  })
+
+  it('keeps role-specific BODY rests in exercise prescriptions and summarizes mixed rests by action', () => {
+    for (const templateId of ['body1', 'body2', 'body3', 'body4', 'body5']) {
+      const level = getTemplate(templateId)!.levels.l4
+      expect(level.metrics).toContainEqual({ label: '休息', value: '按动作处方' })
+    }
+
+    const body05 = getTemplate('body5')!.levels.l4
+    expect(body05.exercises[0].prescription).toContain('休息 120–150 秒')
+    expect(body05.exercises[1].prescription).toContain('休息 120 秒')
+    expect(body05.exercises[2].prescription).toContain('休息 90 秒')
+    expect(body05.exercises[3].prescription).toContain('休息 60–75 秒')
+    expect(body05.exercises[4].prescription).toContain('休息 60–75 秒')
   })
 })

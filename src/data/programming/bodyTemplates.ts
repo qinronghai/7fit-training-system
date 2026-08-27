@@ -3,6 +3,7 @@ import type {
   Count,
   ExerciseKey,
   ExercisePrescription,
+  ExerciseRole,
   Laterality,
   PrepItem,
   PrepPhase,
@@ -18,6 +19,7 @@ import type {
   TrainingBlockEntry,
   TrainingExercise,
 } from './types'
+import { isSelectableExerciseSlot } from './types'
 
 const COACH_NOTE = '以动作质量和可重复训练刺激为先；RIR 与动作技术能力分开管理，教练按当日状态调整负荷。'
 
@@ -71,6 +73,56 @@ const strengthBlock = (
   restBetweenSetsSeconds,
 })
 
+const BODY_ROLE_REST_SECONDS: Record<ProgramLevel, Partial<Record<ExerciseRole, Count>>> = {
+  l1: {
+    PRIMARY: 90,
+    SECONDARY: { min: 75, max: 90 },
+    UNILATERAL: { min: 60, max: 75 },
+    ACCESSORY: { min: 45, max: 60 },
+  },
+  l2: {
+    PRIMARY: { min: 90, max: 120 },
+    SECONDARY: 90,
+    UNILATERAL: 75,
+    ACCESSORY: 60,
+  },
+  l3: {
+    PRIMARY: { min: 120, max: 150 },
+    SECONDARY: { min: 90, max: 120 },
+    UNILATERAL: { min: 75, max: 90 },
+    ACCESSORY: 60,
+  },
+  l4: {
+    PRIMARY: { min: 120, max: 150 },
+    SECONDARY: 120,
+    UNILATERAL: 90,
+    ACCESSORY: { min: 60, max: 75 },
+  },
+}
+
+const withBodyRoleSpecificRest = (
+  programLevel: ProgramLevel,
+  blocks: TrainingBlock[],
+): TrainingBlock[] => blocks.map((block) => ({
+  ...block,
+  exercises: block.exercises.map((entry) => {
+    if (isSelectableExerciseSlot(entry)) {
+      return {
+        ...entry,
+        options: entry.options.map((option) => ({
+          ...option,
+          restSeconds: BODY_ROLE_REST_SECONDS[programLevel][option.role],
+        })),
+      }
+    }
+
+    return {
+      ...entry,
+      restSeconds: BODY_ROLE_REST_SECONDS[programLevel][entry.role],
+    }
+  }),
+}))
+
 const progression = (
   variables: ProgressionVariable[],
   note: string,
@@ -90,7 +142,7 @@ const level = (
   primaryGoal,
   prep: prepItems,
   rampUp,
-  blocks,
+  blocks: withBodyRoleSpecificRest(programLevel, blocks),
   estimatedMinutes,
   targetMuscleSetEstimate,
   ...(progressionFromPrevious ? { progressionFromPrevious } : {}),
@@ -365,7 +417,7 @@ const body02L4 = level(
   [strengthBlock([
     exercise({ exerciseKey: 'low-assistance-pull-up', displayName: '低辅助引体向上', role: 'PRIMARY', movementPattern: 'vpull', laterality: 'bilateral', fatigueRisk: 'high', prescription: { sets: 4, reps: { min: 4, max: 6 }, rir: { min: 1, max: 2 } } }),
     exercise({ exerciseKey: 'heavy-chest-supported-row', displayName: '大负荷胸托划船', role: 'SECONDARY', movementPattern: 'hpull', laterality: 'bilateral', fatigueRisk: 'high', prescription: { sets: 4, reps: { min: 6, max: 8 }, rir: { min: 1, max: 2 } } }),
-    exercise({ exerciseKey: 'cable-pulldown', displayName: '绳索上拉', role: 'ACCESSORY', movementPattern: 'vpull', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 10, max: 15 }, rir: { min: 1, max: 2 } } }),
+    exercise({ exerciseKey: 'cable-pullover', displayName: '绳索上拉', role: 'ACCESSORY', movementPattern: 'vpull', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 10, max: 15 }, rir: { min: 1, max: 2 } } }),
     exercise({ exerciseKey: 'rear-delt-fly', displayName: '反向飞鸟', role: 'ACCESSORY', movementPattern: 'hpush', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 10, max: 15 }, rir: { min: 1, max: 2 } } }),
     exercise({ exerciseKey: 'incline-dumbbell-curl', displayName: '上斜哑铃弯举', role: 'ACCESSORY', movementPattern: 'hpull', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 8, max: 12 }, rir: { min: 1, max: 2 } } }),
   ], 150)],
@@ -419,7 +471,7 @@ const body03L2 = level(
     exercise({ exerciseKey: 'seated-hip-adduction', displayName: '坐姿髋内收', role: 'ACCESSORY', movementPattern: 'adduction', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 12, max: 15 }, rir: 2 } }),
   ], 90)],
   { min: 51, max: 56 },
-  { gluteus: 9, hamstrings: 8, quadriceps: 2, hipAdductors: 2 },
+  { gluteus: 9, hamstrings: 7, quadriceps: 2, hipAdductors: 2 },
   progression(['load', 'volume', 'rir'], '提高髋铰链和腿弯举总量，髋内收保持为独立的直接补量动作。'),
 )
 
@@ -493,7 +545,7 @@ const body04L1 = level(
     exercise({ exerciseKey: 'rope-triceps-pressdown', displayName: '绳索三头下压', role: 'ACCESSORY', movementPattern: 'hpush', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 10, max: 15 }, rir: { min: 2, max: 3 } } }),
   ], 90)],
   { min: 47, max: 52 },
-  { chest: 5, frontDelts: 5, lateralDelts: 2, triceps: 2 },
+  { chest: 5, deltoids: 5, triceps: 2 },
 )
 
 const body04L2 = level(
@@ -516,7 +568,7 @@ const body04L2 = level(
     exercise({ exerciseKey: 'rope-triceps-pressdown', displayName: '绳索三头下压', role: 'ACCESSORY', movementPattern: 'hpush', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 10, max: 15 }, rir: 2 } }),
   ], 90)],
   { min: 49, max: 54 },
-  { chest: 9, frontDelts: 5, lateralDelts: 2, triceps: 2 },
+  { chest: 6, deltoids: 5, triceps: 2 },
   progression(['load', 'volume', 'rir'], '提高哑铃卧推工作组并以胸部孤立动作补量，不增加第三个复合推。'),
 )
 
@@ -541,7 +593,7 @@ const body04L3 = level(
     exercise({ exerciseKey: 'rope-triceps-pressdown', displayName: '绳索三头下压', role: 'ACCESSORY', movementPattern: 'hpush', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 10, max: 15 }, rir: { min: 1, max: 2 } } }),
   ], 120)],
   { min: 51, max: 56 },
-  { chest: 9, frontDelts: 5, lateralDelts: 2, triceps: 2 },
+  { chest: 6, deltoids: 5, triceps: 2 },
   progression(['load', 'rir', 'control'], '默认上斜哑铃卧推与坐姿肩推保持稳定，不用半跪或单臂稳定性制造等级差异。'),
 )
 
@@ -565,7 +617,7 @@ const body04L4 = level(
     exercise({ exerciseKey: 'rope-triceps-pressdown', displayName: '绳索三头下压', role: 'ACCESSORY', movementPattern: 'hpush', laterality: 'bilateral', fatigueRisk: 'low', prescription: { sets: 2, reps: { min: 8, max: 12 }, rir: { min: 1, max: 2 } } }),
   ], 150)],
   { min: 53, max: 58 },
-  { chest: 9, frontDelts: 5, lateralDelts: 2, triceps: 2 },
+  { chest: 6, deltoids: 5, triceps: 2 },
   progression(['load', 'rir'], '高等级来自杠铃卧推负荷与 RIR 控制；第三项保持胸部孤立，不返回复合胸推堆积。'),
 )
 
@@ -609,7 +661,7 @@ const body05L1 = body05Level(
     ramp('floor-glute-bridge', '轻中负荷臀桥', 2, 5, '接近工作负荷并保持骨盆控制。', 45),
   ],
   { min: 47, max: 52 },
-  { gluteus: 5, quadriceps: 2, lats: 3, lateralDelts: 2 },
+  { gluteus: 5, quadriceps: 2, lats: 3, lateralDelts: 2, selectedArm: 2 },
 )
 
 const body05L2 = body05Level(
@@ -626,7 +678,7 @@ const body05L2 = body05Level(
   ],
   [ramp('hip-thrust', '轻重量臀推', 1, 8, '轻负荷确认髋伸展位置。', 30), ramp('hip-thrust', '中轻重量臀推', 2, 5, '接近工作负荷并保持骨盆控制。', 45)],
   { min: 49, max: 54 },
-  { gluteus: 6, quadriceps: 2, upperBack: 3, lateralDelts: 2 },
+  { gluteus: 6, quadriceps: 2, upperBack: 3, lateralDelts: 2, selectedArm: 2 },
   progression(['load', 'volume', 'rir'], '臀推和水平拉负荷提高，单腿动作保持为可控的下肢补充。'),
 )
 
@@ -647,7 +699,7 @@ const body05L3 = body05Level(
     ramp('overload-hip-thrust', '接近工作负荷超程臀推', 3, 3, '确认工作重量下仍能保持动作质量。', 75),
   ],
   { min: 51, max: 56 },
-  { gluteus: 6, quadriceps: 2, upperBack: 4, lateralDelts: 2 },
+  { gluteus: 6, quadriceps: 2, upperBack: 4, lateralDelts: 2, selectedArm: 2 },
   progression(['load', 'rir'], '臀部机械张力提高，拉类和单腿动作仍采用稳定、可恢复的默认选择。'),
 )
 
@@ -668,7 +720,7 @@ const body05L4 = body05Level(
     ramp('heavy-hip-thrust', '接近工作负荷大负荷臀推', 3, 3, '确认高负荷下仍能保持动作质量。', 120),
   ],
   { min: 53, max: 58 },
-  { gluteus: 6, quadriceps: 2, upperBack: 4, lateralDelts: 2 },
+  { gluteus: 6, quadriceps: 2, upperBack: 4, lateralDelts: 2, selectedArm: 2 },
   progression(['load', 'rir'], '高级性来自臀推与胸托划船的张力和 RIR；第五槽仍是可选择的单一 ACCESSORY。'),
 )
 

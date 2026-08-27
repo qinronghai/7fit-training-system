@@ -268,11 +268,23 @@ const toLegacyProgrammingExercise = (
   ),
 })
 
+const sameCount = (left: Count | undefined, right: Count | undefined): boolean => {
+  if (left === undefined || right === undefined) return left === right
+  const leftRange = typeof left === 'number' ? { min: left, max: left } : left
+  const rightRange = typeof right === 'number' ? { min: right, max: right } : right
+  return leftRange.min === rightRange.min && leftRange.max === rightRange.max
+}
+
 const toLegacyProgrammingMetrics = (
   source: ResolvedProgrammingLevel,
 ): TemplateLevel['metrics'] => {
   const circuit = source.blocks.find((block) => block.kind === 'circuit')
   const primary = source.exercises.find((item) => item.role === 'PRIMARY')
+  const strengthBlocks = source.blocks.filter((block) => block.kind === 'strength')
+  const strengthRests = strengthBlocks.flatMap((block) => block.exercises.map((item) => item.restSeconds ?? block.restBetweenSetsSeconds))
+  const firstStrengthRest = strengthRests[0]
+  const hasMixedStrengthRests = strengthRests.length > 1
+    && strengthRests.some((rest) => !sameCount(rest, firstStrengthRest))
   const rounds = circuit?.rounds === undefined
     ? source.exercises
       .reduce((total, item) => total + (typeof item.prescription.sets === 'number' ? item.prescription.sets : 0), 0) + ' 组'
@@ -284,9 +296,11 @@ const toLegacyProgrammingMetrics = (
       : '按动作处方'
   const rest = circuit?.restBetweenRoundsSeconds !== undefined
     ? '轮间 ' + formatCount(circuit.restBetweenRoundsSeconds, ' 秒')
-    : source.blocks[0]?.restBetweenSetsSeconds === undefined
+    : hasMixedStrengthRests
       ? '按动作处方'
-      : formatCount(source.blocks[0].restBetweenSetsSeconds, ' 秒')
+      : firstStrengthRest === undefined
+      ? '按动作处方'
+      : formatCount(firstStrengthRest, ' 秒')
 
   return [
     { label: '轮数', value: rounds },
