@@ -1,9 +1,13 @@
 import type {
+  ConditioningRoundPolicy,
+  ConditioningPowerPath,
+  ConditioningSessionTimeComponentsSeconds,
   Count,
   ExercisePrescription,
   ExerciseRole,
   Laterality,
   NumericRange,
+  PowerTrackSlot,
   ProgramLevel,
   ProgrammingSelection,
   ProgrammingTemplate,
@@ -14,7 +18,7 @@ import type {
   TrainingBlock,
   TrainingExercise,
 } from './types'
-import { getTrainingExercises, isSelectableExerciseSlot } from './types'
+import { getTrainingExercises, isPowerTrackSlot, isSelectableExerciseSlot } from './types'
 
 const DEFAULT_SECONDS_PER_REP = 4
 const DEFAULT_SECONDS_PER_METER = 1
@@ -41,6 +45,8 @@ const addRange = (left: NumericRange, right: NumericRange): NumericRange => ({
   min: left.min + right.min,
   max: left.max + right.max,
 })
+
+const roundMinutes = (seconds: number): number => Math.round((seconds / 60) * 100) / 100
 
 const multiplyRange = (value: NumericRange, multiplier: NumericRange | number): NumericRange => {
   if (typeof multiplier === 'number') {
@@ -83,6 +89,25 @@ const VALID_MOVEMENT_PATTERNS = new Set([
   'carry',
   'rotation',
 ])
+
+const VALID_CONDITIONING_OUTPUT_KINDS = new Set([
+  'work-bout-distance',
+  'pace',
+  'power',
+  'erg-output',
+  'sled-split-time',
+  'carry-load',
+  'carry-distance',
+  'completion-time',
+  'round-completion-time',
+  'power-quality',
+  'explosive-reps',
+  'velocity',
+  'throw-distance',
+  'locomotion-quality',
+])
+
+const VALID_CONDITIONING_OUTPUT_SCOPES = new Set(['bout', 'set', 'station', 'round', 'level'])
 
 const issue = (code: string, path: string, message: string): AuditIssue => ({
   code,
@@ -157,6 +182,71 @@ const resolveSelectableSlot = (
   return { exercises, selectedKey, complementaryIncluded }
 }
 
+type ResolvedPowerTrack = {
+  path: ConditioningPowerPath
+  requestedOptionKey?: string
+  resolvedOptionKey: string
+  mode: 'selected-track' | 'fallback-option' | 'foundation-regression'
+}
+
+const resolvePowerTrackSlot = (
+  slot: PowerTrackSlot,
+  selection: ProgrammingSelection,
+  path: string,
+): ResolvedPowerTrack => {
+  const selected = selection.powerTracks?.[slot.id]
+  const requestedOptionKey = selected?.optionKey
+  const requestedKey = requestedOptionKey ?? slot.defaultSelection
+
+  if (requestedKey === 'foundation-regression') {
+    if (!slot.foundationRegression) {
+      throw new Error(path + ': Foundation Regression is not configured for this Power Track')
+    }
+    return {
+      path: slot.foundationRegression,
+      requestedOptionKey,
+      resolvedOptionKey: slot.foundationRegression.powerExercise.exerciseKey,
+      mode: 'foundation-regression',
+    }
+  }
+
+  const option = slot.options.find((candidate) => candidate.optionKey === requestedKey)
+  if (!option) {
+    throw new Error(path + ': Power Track option "' + requestedKey + '" is not approved for this slot')
+  }
+
+  if (option.requiresTechniqueCompetency && selected?.techniqueReady !== true) {
+    if (slot.fallbackOptionKey) {
+      const fallback = slot.options.find((candidate) => candidate.optionKey === slot.fallbackOptionKey)
+      if (!fallback) {
+        throw new Error(path + ': configured Power Track fallback is not approved for this slot')
+      }
+      return {
+        path: fallback.path,
+        requestedOptionKey,
+        resolvedOptionKey: fallback.path.powerExercise.exerciseKey,
+        mode: 'fallback-option',
+      }
+    }
+    if (slot.foundationRegression) {
+      return {
+        path: slot.foundationRegression,
+        requestedOptionKey,
+        resolvedOptionKey: slot.foundationRegression.powerExercise.exerciseKey,
+        mode: 'foundation-regression',
+      }
+    }
+    throw new Error(path + ': Power Track requires Technique Competency or an approved fallback')
+  }
+
+  return {
+    path: option.path,
+    requestedOptionKey,
+    resolvedOptionKey: option.path.powerExercise.exerciseKey,
+    mode: 'selected-track',
+  }
+}
+
 export const resolveProgrammingLevel = (
   level: ProgrammingTemplateLevel,
   selection: ProgrammingSelection = {},
@@ -164,13 +254,35 @@ export const resolveProgrammingLevel = (
   const slotIds = new Set(level.blocks.flatMap((block) => block.exercises
     .filter(isSelectableExerciseSlot)
     .map((slot) => slot.id)))
+  const powerTrackIds = new Set(level.blocks.flatMap((block) => block.exercises
+    .filter(isPowerTrackSlot)
+    .map((slot) => slot.id)))
+  if (powerTrackIds.size > 0 && selection.includeComplementaryOption === true) {
+    throw new Error('CON Power Track options cannot use BODY complementary selection semantics')
+  }
   const unknownSelectionId = Object.keys(selection.selectable ?? {}).find((slotId) => !slotIds.has(slotId))
   if (unknownSelectionId) {
     throw new Error(`selectable.${unknownSelectionId}: slot does not exist in this Programming level`)
   }
+  const unknownPowerTrackId = Object.keys(selection.powerTracks ?? {}).find((slotId) => !powerTrackIds.has(slotId))
+  if (unknownPowerTrackId) {
+    throw new Error('powerTracks.' + unknownPowerTrackId + ': slot does not exist in this Programming level')
+  }
+  const conditioningBlockIds = new Set(level.blocks
+    .filter((block) => block.kind === 'conditioning')
+    .map((block) => block.id))
+  const unknownRoundBlockId = Object.keys(selection.conditioningRounds ?? {})
+    .find((blockId) => !conditioningBlockIds.has(blockId))
+  if (unknownRoundBlockId) {
+    throw new Error('conditioningRounds.' + unknownRoundBlockId + ': fixed or unknown conditioning block')
+  }
   const selections: Record<string, string> = {}
+  const powerTrackSelections: NonNullable<ResolvedProgrammingLevel['powerTrackSelections']> = {}
   let optionalIncluded = false
   let complementaryIncluded = false
+  let effectivePrep = level.prep
+  let effectiveSpecificBuildUp = level.specificBuildUp
+  let effectivePlanningTime = level.planningTime
   const blocks = level.blocks.map((block, blockIndex) => {
     const exercises: TrainingExercise[] = []
     block.exercises.forEach((entry, entryIndex) => {
@@ -185,21 +297,68 @@ export const resolveProgrammingLevel = (
         complementaryIncluded = complementaryIncluded || resolvedSlot.complementaryIncluded
         return
       }
+      if (isPowerTrackSlot(entry)) {
+        const resolvedPowerTrack = resolvePowerTrackSlot(
+          entry,
+          selection,
+          'blocks[' + blockIndex + '].exercises[' + entryIndex + ']',
+        )
+        if (Object.keys(powerTrackSelections).length > 0) {
+          throw new Error('A Conditioning level may resolve only one mutually exclusive Power Track')
+        }
+        effectivePrep = resolvedPowerTrack.path.prep.map((item) => ({ ...item }))
+        effectiveSpecificBuildUp = resolvedPowerTrack.path.specificBuildUp.map((item) => ({ ...item }))
+        if (resolvedPowerTrack.path.planningTime) {
+          effectivePlanningTime = {
+            ...(effectivePlanningTime ?? { setupCoachingAllowanceSeconds: { min: 0, max: 0 } }),
+            ...resolvedPowerTrack.path.planningTime,
+          }
+        }
+        powerTrackSelections[entry.id] = {
+          ...(resolvedPowerTrack.requestedOptionKey
+            ? { requestedOptionKey: resolvedPowerTrack.requestedOptionKey }
+            : {}),
+          resolvedOptionKey: resolvedPowerTrack.resolvedOptionKey,
+          mode: resolvedPowerTrack.mode,
+        }
+        exercises.push({ ...resolvedPowerTrack.path.powerExercise })
+        return
+      }
       if (entry.optional === true && selection.includeOptional !== true) return
       if (entry.optional === true) optionalIncluded = true
       exercises.push({ ...entry })
     })
+    const selectedRounds = selection.conditioningRounds?.[block.id]
+    if (selectedRounds !== undefined) {
+      if (!block.roundPolicy) {
+        throw new Error('conditioningRounds.' + block.id + ': this block has no conditional round policy')
+      }
+      const maximumRounds = block.roundPolicy.conditionalMaxRounds
+      if (!Number.isInteger(selectedRounds)
+        || maximumRounds === undefined
+        || selectedRounds !== maximumRounds) {
+        throw new Error('conditioningRounds.' + block.id + ': selected rounds are outside the approved policy')
+      }
+      return { ...block, rounds: selectedRounds, exercises }
+    }
     return { ...block, exercises }
   })
 
-  return {
+  const resolved: ResolvedProgrammingLevel = {
     ...level,
+    prep: effectivePrep,
+    ...(effectiveSpecificBuildUp ? { specificBuildUp: effectiveSpecificBuildUp } : {}),
+    ...(effectivePlanningTime ? { planningTime: effectivePlanningTime } : {}),
     blocks,
     exercises: blocks.flatMap((block) => block.exercises),
     selections,
     optionalIncluded,
     complementaryIncluded,
   }
+  if (Object.keys(powerTrackSelections).length > 0) {
+    resolved.powerTrackSelections = powerTrackSelections
+  }
+  return resolved
 }
 
 const countValue = (value: Count | undefined, fallback = 0): number => {
@@ -331,6 +490,8 @@ const VALID_PROGRESSION_VARIABLES = new Set([
   'rest',
   'range',
   'control',
+  'output',
+  'density',
 ])
 
 const validateProgressionMetadata = (
@@ -464,7 +625,11 @@ const validateFatigueStack = (
 
 export const auditSharedTemplateLevel = (
   level: ProgrammingTemplateLevel,
-  options: { requireExplicitPatternPrep?: boolean } = {},
+  options: {
+    requireExplicitPatternPrep?: boolean
+    requirePrimaryRole?: boolean
+    validatePrepAndRamp?: boolean
+  } = {},
 ): AuditIssue[] => {
   const issues: AuditIssue[] = []
   if (!level.primaryGoal.trim()) {
@@ -472,9 +637,11 @@ export const auditSharedTemplateLevel = (
   }
 
   const formalExercises = allExercises(level)
-  const primaryCount = formalExercises.filter((exercise) => exercise.role === 'PRIMARY').length
-  if (primaryCount !== 1) {
-    issues.push(issue('PRIMARY_COUNT', 'blocks', 'Every level must contain exactly one PRIMARY exercise.'))
+  if (options.requirePrimaryRole !== false) {
+    const primaryCount = formalExercises.filter((exercise) => exercise.role === 'PRIMARY').length
+    if (primaryCount !== 1) {
+      issues.push(issue('PRIMARY_COUNT', 'blocks', 'Every level must contain exactly one PRIMARY exercise.'))
+    }
   }
   formalExercises.forEach((exercise, index) => validateExercise(exercise, 'exercise[' + index + ']', issues))
   level.blocks.forEach((block, blockIndex) => {
@@ -484,7 +651,9 @@ export const auditSharedTemplateLevel = (
       }
     })
   })
-  validatePrepAndRamp(level, issues, options.requireExplicitPatternPrep === true)
+  if (options.validatePrepAndRamp !== false) {
+    validatePrepAndRamp(level, issues, options.requireExplicitPatternPrep === true)
+  }
   validateFatigueStack(level, issues)
   validateProgressionMetadata(level, issues)
 
@@ -512,6 +681,363 @@ export const audit3CTemplateLevel = (
     || manualMax < calculatedMax
     || manualMax - calculatedMax > 10) {
     issues.push(issue('ESTIMATE_MISMATCH', 'estimatedMinutes.max', 'Manual maximum must cover the calculated maximum and stay within a 10-minute gap.'))
+  }
+
+  return issues
+}
+
+const validPlanningRange = (value: NumericRange | undefined): boolean => Boolean(
+  value
+  && Number.isFinite(value.min)
+  && Number.isFinite(value.max)
+  && value.min >= 0
+  && value.min <= value.max,
+)
+
+const validateConditioningPrep = (
+  level: ProgrammingTemplateLevel,
+  issues: AuditIssue[],
+  pathPrefix = '',
+): void => {
+  const prepPath = pathPrefix + 'prep'
+  if (level.prep.length !== 4) {
+    issues.push(issue('CON_PREP_COUNT', prepPath, 'CON must contain exactly four R/M/A/P PrepItems.'))
+  }
+  const expectedPhases = ['R', 'M', 'A', 'P']
+  if (level.prep.map((item) => item.phase).join('|') !== expectedPhases.join('|')) {
+    issues.push(issue('CON_PREP_PHASES', prepPath, 'CON PrepItems must be ordered R, M, A, P.'))
+  }
+  level.prep.forEach((item, index) => {
+    const path = prepPath + '[' + index + ']'
+    if (generatedExerciseKey(item.exerciseKey)
+      || !item.displayName.trim()
+      || !hasWorkPrescription(item.prescription)) {
+      issues.push(issue('CON_PREP_ITEM_INVALID', path, 'Each CON PrepItem must be one explicit exercise with a measurable prescription.'))
+    }
+    if (!item.displayName.trim() || forbiddenCompoundName(item.displayName)) {
+      issues.push(issue('COMPOUND_EXERCISE_NAME', path + '.displayName', 'Prep slots must describe one Exercise.'))
+    }
+    if (!validPlanningRange(item.planningExecutionSeconds)) {
+      issues.push(issue('CON_PLANNING_TIME', path + '.planningExecutionSeconds', 'Each CON PrepItem needs an atomic planning execution range.'))
+    }
+    if (item.prescription.rir !== undefined) {
+      issues.push(issue('CON_RIR_FORBIDDEN', path + '.prescription.rir', 'CON does not use RIR prescriptions.'))
+    }
+    if (/泡沫轴|筋膜球|foam\s*roll/i.test(item.displayName)) {
+      issues.push(issue('FOAM_ROLLING_IN_PREP', path + '.displayName', 'Foam rolling is Individual Prep, not fixed CON Prep.'))
+    }
+  })
+
+  if (level.rampUp.length !== 0) {
+    issues.push(issue('CON_RAMP_UP_FORBIDDEN', 'rampUp', 'CON uses specificBuildUp for S; rampUp must be empty.'))
+  }
+  const buildUp = level.specificBuildUp ?? []
+  if (buildUp.length === 0) {
+    issues.push(issue('CON_SPECIFIC_BUILD_UP_REQUIRED', 'specificBuildUp', 'CON must define at least one Specific Build-up item.'))
+  }
+  buildUp.forEach((item, index) => {
+    const path = pathPrefix + 'specificBuildUp[' + index + ']'
+    if (!item.id.trim()
+      || generatedExerciseKey(item.exerciseKey)
+      || !item.displayName.trim()
+      || !hasWorkPrescription(item.prescription)) {
+      issues.push(issue('CON_BUILD_UP_INVALID', path, 'Each Specific Build-up item must be one explicit modality exposure with a measurable prescription.'))
+    }
+    if (!item.displayName.trim() || forbiddenCompoundName(item.displayName)) {
+      issues.push(issue('COMPOUND_EXERCISE_NAME', path + '.displayName', 'Specific Build-up slots must describe one Exercise.'))
+    }
+    if (item.order !== index + 1) {
+      issues.push(issue('CON_BUILD_UP_INVALID', path + '.order', 'Specific Build-up order must be sequential and explicit.'))
+    }
+    if (!validPlanningRange(item.planningExecutionSeconds)) {
+      issues.push(issue('CON_PLANNING_TIME', path + '.planningExecutionSeconds', 'Each Specific Build-up item needs an atomic planning execution range.'))
+    }
+    if (item.prescription.rir !== undefined) {
+      issues.push(issue('CON_RIR_FORBIDDEN', path + '.prescription.rir', 'CON does not use RIR prescriptions.'))
+    }
+  })
+}
+
+const validateConditioningLaterality = (
+  exercise: TrainingExercise,
+  path: string,
+  issues: AuditIssue[],
+): void => {
+  if (exercise.laterality !== 'unilateral') return
+  if (!exercise.sideExecution || !exercise.startingSidePolicy) {
+    issues.push(issue('CON_UNILATERAL_EXECUTION', path, 'Unilateral CON work must define side execution and starting-side policy.'))
+  }
+  if (exercise.sideExecution === 'one-side-then-opposite'
+    && (exercise.sideRestSeconds === undefined || !validPlanningRange(toRange(exercise.sideRestSeconds)))) {
+    issues.push(issue('CON_UNILATERAL_RESET', path + '.sideRestSeconds', 'One-side-then-opposite CON work must define a valid side reset.'))
+  }
+}
+
+const validateConditioningRoundPolicy = (
+  policy: ConditioningRoundPolicy,
+  path: string,
+  issues: AuditIssue[],
+): void => {
+  if (!Number.isInteger(policy.standardRounds) || policy.standardRounds <= 0) {
+    issues.push(issue('CON_ROUND_POLICY_INVALID', path + '.standardRounds', 'Standard conditioning rounds must be a positive integer.'))
+  }
+  if (policy.conditionalMaxRounds !== undefined
+    && (!Number.isInteger(policy.conditionalMaxRounds)
+      || policy.conditionalMaxRounds <= policy.standardRounds)) {
+    issues.push(issue('CON_ROUND_POLICY_INVALID', path + '.conditionalMaxRounds', 'Conditional maximum rounds must be greater than standard rounds.'))
+  }
+  if (policy.conditionalMaxRounds !== undefined) {
+    const conditions = policy.conditions ?? []
+    const validConditions = new Set(['output-stability', 'recovery', 'technique', 'session-time'])
+    if (conditions.length === 0
+      || new Set(conditions).size !== conditions.length
+      || conditions.some((condition) => !validConditions.has(condition))) {
+      issues.push(issue('CON_ROUND_POLICY_INVALID', path + '.conditions', 'Conditional rounds must declare unique approved coach conditions.'))
+    }
+  }
+}
+
+const validateConditioningPath = (
+  pathValue: ConditioningPowerPath,
+  path: string,
+  issues: AuditIssue[],
+): void => {
+  const pathLevel: ProgrammingTemplateLevel = {
+    programLevel: 'l4',
+    primaryGoal: 'power path',
+    prep: pathValue.prep,
+    rampUp: [],
+    specificBuildUp: pathValue.specificBuildUp,
+    blocks: [],
+    estimatedMinutes: { min: 0, max: 0 },
+    coachNote: 'power path validation',
+  }
+  validateConditioningPrep(pathLevel, issues, path + '.')
+  const power = pathValue.powerExercise
+  validateExercise(power, path + '.powerExercise', issues)
+  if (power.role !== 'POWER') {
+    issues.push(issue('CON_ROLE_MAPPING', path + '.powerExercise.role', 'Power path exercises must use role POWER.'))
+  }
+  if (!validPlanningRange(power.planningExecutionSeconds)) {
+    issues.push(issue('CON_PLANNING_TIME', path + '.powerExercise.planningExecutionSeconds', 'Power path exercises need atomic planning execution time.'))
+  }
+  if (power.prescription.rir !== undefined) {
+    issues.push(issue('CON_RIR_FORBIDDEN', path + '.powerExercise.prescription.rir', 'CON does not use RIR prescriptions.'))
+  }
+  if (countRange(power.prescription.sets) === null) {
+    issues.push(issue('POWER_SETS_REQUIRED', path + '.powerExercise.prescription.sets', 'Power exercises must define sets.'))
+  }
+}
+
+const validatePowerTrackSlot = (
+  slot: PowerTrackSlot,
+  path: string,
+  issues: AuditIssue[],
+): void => {
+  if (slot.role !== 'POWER') {
+    issues.push(issue('CON_ROLE_MAPPING', path + '.role', 'Power Track slots must use role POWER.'))
+  }
+  if (slot.options.length === 0) {
+    issues.push(issue('CON_POWER_TRACK_INVALID', path + '.options', 'Power Track slots must define at least one peer option.'))
+  }
+  const optionKeys = slot.options.map((option) => option.optionKey)
+  const trackKeys = slot.options.map((option) => option.trackKey)
+  if (optionKeys.includes('foundation-regression')) {
+    issues.push(issue('CON_FOUNDATION_REGRESSION_INVALID', path + '.options', 'Foundation Regression must be stored separately from peer Power Track options.'))
+  }
+  if (new Set(optionKeys).size !== optionKeys.length) {
+    issues.push(issue('CON_POWER_TRACK_INVALID', path + '.options', 'Power Track options must be unique and cannot include Foundation Regression.'))
+  }
+  if (new Set(trackKeys).size !== trackKeys.length) {
+    issues.push(issue('CON_POWER_TRACK_INVALID', path + '.options', 'Power Track keys must be unique.'))
+  }
+  if (slot.defaultSelection !== 'foundation-regression' && !optionKeys.includes(slot.defaultSelection)) {
+    issues.push(issue('CON_POWER_TRACK_INVALID', path + '.defaultSelection', 'Power Track default must belong to the peer option set or Foundation Regression.'))
+  }
+  if (slot.defaultSelection === 'foundation-regression' && !slot.foundationRegression) {
+    issues.push(issue('CON_FOUNDATION_REGRESSION_INVALID', path + '.foundationRegression', 'Foundation Regression must be configured when selected as the default.'))
+  }
+  if (slot.fallbackOptionKey !== undefined && !optionKeys.includes(slot.fallbackOptionKey)) {
+    issues.push(issue('CON_POWER_TRACK_INVALID', path + '.fallbackOptionKey', 'Power Track fallback must belong to the peer option set.'))
+  }
+  slot.options.forEach((option, index) => {
+    validateConditioningPath(option.path, path + '.options[' + index + '].path', issues)
+  })
+  if (slot.foundationRegression) {
+    validateConditioningPath(slot.foundationRegression, path + '.foundationRegression', issues)
+  }
+}
+
+const validateConditioningBlockStructure = (
+  level: ProgrammingTemplateLevel,
+  issues: AuditIssue[],
+): void => {
+  const actualKinds = level.blocks.map((block) => block.kind)
+  if (actualKinds.length < 1
+    || actualKinds.length > 2
+    || actualKinds.some((kind) => kind !== 'power' && kind !== 'conditioning')
+    || actualKinds.filter((kind) => kind === 'conditioning').length !== 1
+    || (actualKinds.includes('power') && actualKinds[0] !== 'power')) {
+    issues.push(issue('CON_BLOCK_ORDER', 'blocks', 'CON blocks must be one Conditioning Block or Power followed by Conditioning.'))
+  }
+
+  const powerIndex = level.blocks.findIndex((block) => block.kind === 'power')
+  const conditioningIndex = level.blocks.findIndex((block) => block.kind === 'conditioning')
+  level.blocks.forEach((block, blockIndex) => {
+    const path = 'blocks[' + blockIndex + ']'
+    if (block.kind === 'strength' || block.kind === 'circuit') {
+      issues.push(issue('CON_BLOCK_KIND', path + '.kind', 'CON does not use Strength or Circuit Blocks.'))
+      return
+    }
+    block.exercises.forEach((entry, exerciseIndex) => {
+      const exercisePath = path + '.exercises[' + exerciseIndex + ']'
+      if (isSelectableExerciseSlot(entry)) {
+        issues.push(issue('CON_SELECTABLE_SLOT_FORBIDDEN', exercisePath, 'CON uses explicit Power Track paths, not BODY selectable slots.'))
+        return
+      }
+      if (isPowerTrackSlot(entry)) {
+        if (block.kind !== 'power') {
+          issues.push(issue('CON_POWER_TRACK_INVALID', exercisePath, 'Power Track slots may only appear in a Power Block.'))
+        }
+        validatePowerTrackSlot(entry, exercisePath, issues)
+        return
+      }
+      validateExercise(entry, exercisePath, issues)
+      if (!validPlanningRange(entry.planningExecutionSeconds)) {
+        issues.push(issue('CON_PLANNING_TIME', exercisePath + '.planningExecutionSeconds', 'Each CON work station needs an atomic planning execution range.'))
+      }
+      if (entry.prescription.rir !== undefined) {
+        issues.push(issue('CON_RIR_FORBIDDEN', exercisePath + '.prescription.rir', 'CON does not use RIR prescriptions.'))
+      }
+      if (block.kind === 'conditioning') {
+        if (entry.prescription.sets !== undefined) {
+          issues.push(issue('CONDITIONING_SETS_FORBIDDEN', exercisePath + '.prescription.sets', 'Conditioning stations are prescribed per round, not with action-level sets.'))
+        }
+        const expectedRole = entry.movementPattern === 'carry' ? 'CARRY' : 'CONDITIONING'
+        if (entry.role !== expectedRole) {
+          issues.push(issue('CON_ROLE_MAPPING', exercisePath + '.role', 'CON station roles must map Carry to CARRY and other stations to CONDITIONING.'))
+        }
+      } else if (entry.role !== 'POWER') {
+        issues.push(issue('CON_ROLE_MAPPING', exercisePath + '.role', 'Power Block exercises must use role POWER.'))
+      } else if (countRange(entry.prescription.sets) === null) {
+        issues.push(issue('POWER_SETS_REQUIRED', exercisePath + '.prescription.sets', 'Power exercises must define sets.'))
+      }
+      validateConditioningLaterality(entry, exercisePath, issues)
+    })
+
+    if (block.kind === 'conditioning') {
+      const rounds = countRange(block.rounds)
+      if (!rounds || rounds.min <= 0 || !Number.isInteger(rounds.min) || !Number.isInteger(rounds.max)) {
+        issues.push(issue('CONDITIONING_ROUNDS', path + '.rounds', 'Conditioning Block must define positive integer rounds.'))
+      }
+      if (block.exercises.length > 1 && block.transitionSeconds === undefined) {
+        issues.push(issue('CONDITIONING_TRANSITION', path + '.transitionSeconds', 'Multi-station Conditioning Blocks need explicit station transition time.'))
+      }
+      if (rounds && rounds.max > 1 && block.transitionBetweenRoundsSeconds === undefined) {
+        issues.push(issue('CONDITIONING_TRANSITION', path + '.transitionBetweenRoundsSeconds', 'Multi-round Conditioning Blocks need explicit inter-round transition time.'))
+      }
+      if (rounds && rounds.max > 1 && block.restBetweenRoundsSeconds === undefined) {
+        issues.push(issue('CONDITIONING_RECOVERY', path + '.restBetweenRoundsSeconds', 'Multi-round Conditioning Blocks need explicit round recovery.'))
+      }
+      if (block.roundPolicy) {
+        validateConditioningRoundPolicy(block.roundPolicy, path + '.roundPolicy', issues)
+      } else if (rounds && rounds.min !== rounds.max) {
+        issues.push(issue('CON_ROUND_POLICY_INVALID', path + '.roundPolicy', 'A round range requires an explicit conditional round policy.'))
+      }
+    }
+  })
+
+  if (powerIndex >= 0) {
+    const power = level.blocks[powerIndex]
+    if (power.restBetweenSetsSeconds === undefined
+      && !power.exercises.some((entry) => !isSelectableExerciseSlot(entry)
+        && !isPowerTrackSlot(entry)
+        && entry.restSeconds !== undefined)) {
+      issues.push(issue('POWER_RECOVERY_REQUIRED', 'blocks[' + powerIndex + '].restBetweenSetsSeconds', 'Power work needs explicit set recovery.'))
+    }
+    if (conditioningIndex >= 0 && powerIndex > conditioningIndex) {
+      issues.push(issue('CON_BLOCK_ORDER', 'blocks', 'Power must precede Conditioning fatigue.'))
+    }
+    if (conditioningIndex >= 0 && power.transitionAfterSeconds === undefined) {
+      issues.push(issue('POWER_TO_CONDITIONING_TRANSITION_REQUIRED', 'blocks[' + powerIndex + '].transitionAfterSeconds', 'Power-to-Conditioning transition must be explicit.'))
+    }
+  }
+}
+
+const validateConditioningMetadata = (
+  level: ProgrammingTemplateLevel,
+  issues: AuditIssue[],
+): void => {
+  if (!level.conditioningIntensityTarget
+    || level.conditioningIntensityTarget.rpe === undefined
+    || !level.conditioningIntensityTarget.note.trim()) {
+    issues.push(issue('CON_INTENSITY_TARGET', 'conditioningIntensityTarget', 'CON must define a level-level RPE target and coach note.'))
+  }
+  if (!level.outputPlan?.primary
+    || level.outputPlan.outputStability?.kind !== 'coach-design-target'
+    || !level.outputPlan.outputStability.description.trim()) {
+    issues.push(issue('CON_OUTPUT_PLAN', 'outputPlan', 'CON must define output metric metadata and a Coach Design Target.'))
+  } else {
+    const metrics = [level.outputPlan.primary, ...(level.outputPlan.supporting ?? [])]
+    metrics.forEach((metric, index) => {
+      if (!VALID_CONDITIONING_OUTPUT_KINDS.has(metric.kind)
+        || !VALID_CONDITIONING_OUTPUT_SCOPES.has(metric.scope)
+        || (metric.availability !== 'required' && metric.availability !== 'when-available')) {
+        issues.push(issue('CON_OUTPUT_PLAN', 'outputPlan.' + (index === 0 ? 'primary' : 'supporting[' + (index - 1) + ']'), 'CON output metrics must use approved design-only kinds, scopes and availability.'))
+      }
+    })
+  }
+  if (!level.planningTime || !validPlanningRange(level.planningTime.setupCoachingAllowanceSeconds)) {
+    issues.push(issue('CON_PLANNING_TIME', 'planningTime.setupCoachingAllowanceSeconds', 'CON must define a valid session setup/coaching planning range.'))
+  }
+  if (level.planningTime?.buildUpCoachingAllowanceSeconds !== undefined
+    && !validPlanningRange(level.planningTime.buildUpCoachingAllowanceSeconds)) {
+    issues.push(issue('CON_PLANNING_TIME', 'planningTime.buildUpCoachingAllowanceSeconds', 'Build-up coaching allowance must be a valid planning range.'))
+  }
+  if (!level.progressionFromPrevious) {
+    issues.push(issue('CON_PROGRESSION_REQUIRED', 'progressionFromPrevious', 'Every CON level must declare progression evidence.'))
+  } else if (level.progressionFromPrevious.variables.includes('rir')) {
+    issues.push(issue('CON_PROGRESSION_RIR_FORBIDDEN', 'progressionFromPrevious.variables', 'RIR is not a CON progression variable.'))
+  }
+}
+
+export const auditConditioningTemplateLevel = (
+  level: ProgrammingTemplateLevel,
+  selection?: ProgrammingSelection,
+): AuditIssue[] => {
+  const issues = auditSharedTemplateLevel(level, {
+    requirePrimaryRole: false,
+    validatePrepAndRamp: false,
+  })
+  validateConditioningPrep(level, issues)
+  validateConditioningBlockStructure(level, issues)
+  validateConditioningMetadata(level, issues)
+
+  try {
+    const resolved = resolvedLevelFor(level, selection)
+    const estimate = estimateSessionMinutes(resolved)
+    const calculatedMax = estimate.totalMinutes.max
+    if (calculatedMax > 60) {
+      issues.push(issue(
+        'TIME_OVER_BUDGET',
+        'calculatedSessionMinutes.max',
+        'Calculated CON session maximum exceeds 60 minutes.',
+      ))
+    }
+    const manualMax = level.estimatedMinutes.max
+    if (!Number.isFinite(manualMax) || manualMax < calculatedMax) {
+      issues.push(issue(
+        'ESTIMATE_MISMATCH',
+        'estimatedMinutes.max',
+        'Manual maximum must cover the calculated CON session maximum.',
+      ))
+    }
+  } catch (error) {
+    issues.push(issue(
+      'CON_TIME_INVALID',
+      'calculatedSessionMinutes',
+      error instanceof Error ? error.message : 'CON session time could not be calculated.',
+    ))
   }
 
   return issues
@@ -1045,15 +1571,132 @@ export const auditBodyTemplateSet = (
   return issues
 }
 
+const validateConditioningTemplateSetShape = (
+  templates: readonly ProgrammingTemplate[],
+  issues: AuditIssue[],
+): void => {
+  const expectedIds = ['con1', 'con2', 'con3', 'con4', 'con5']
+  if (templates.length !== expectedIds.length
+    || templates.map((template) => template.id).join('|') !== expectedIds.join('|')) {
+    issues.push(issue('TEMPLATE_SET', 'templates', 'The CON Programming source must contain exactly con1 through con5.'))
+  }
+  const seen = new Set<string>()
+  templates.forEach((template, templateIndex) => {
+    if (seen.has(template.id)) {
+      issues.push(issue('TEMPLATE_SET', 'templates[' + templateIndex + '].id', 'Template IDs must be unique.'))
+    }
+    seen.add(template.id)
+    const levels = Object.keys(template.levels)
+    if (levels.length !== 4 || !['l1', 'l2', 'l3', 'l4'].every((programLevel) => levels.includes(programLevel))) {
+      issues.push(issue('LEVEL_SET', 'templates[' + templateIndex + '].levels', 'Every CON template must contain L1 through L4.'))
+    }
+  })
+}
+
+export const auditConditioningTemplateSet = (
+  templates: readonly ProgrammingTemplate[],
+): AuditIssue[] => {
+  const issues: AuditIssue[] = []
+  validateConditioningTemplateSetShape(templates, issues)
+  for (const template of templates) {
+    const levels = (['l1', 'l2', 'l3', 'l4'] as const).map((programLevel) => template.levels[programLevel])
+    levels.forEach((level) => {
+      if (!level) {
+        issues.push(issue('LEVEL_SET', template.id, 'Template level is missing.'))
+        return
+      }
+      const selections: Array<{ name: string; selection: ProgrammingSelection }> = [
+        { name: 'default', selection: {} },
+      ]
+      if (template.id === 'con3' && level.programLevel === 'l3') {
+        selections.push({
+          name: 'swing-track',
+          selection: {
+            powerTracks: {
+              'con3-l3-power': { optionKey: 'kb-swing', techniqueReady: true },
+            },
+          },
+        })
+      }
+      if (template.id === 'con3' && level.programLevel === 'l4') {
+        selections.push(
+          {
+            name: 'swing-track',
+            selection: {
+              powerTracks: {
+                'con3-l4-power': { optionKey: 'kb-swing', techniqueReady: true },
+              },
+            },
+          },
+          {
+            name: 'rotational-track',
+            selection: {
+              powerTracks: {
+                'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true },
+              },
+            },
+          },
+        )
+      }
+      if (template.id === 'con5' && level.programLevel === 'l3') {
+        selections.push({
+          name: 'conditional-four-round',
+          selection: { conditioningRounds: { 'conditioning-main': 4 } },
+        })
+      }
+
+      selections.forEach(({ name, selection }, scenarioIndex) => {
+        auditConditioningTemplateLevel(level, selection).forEach((levelIssue) => {
+          issues.push({
+            ...levelIssue,
+            path: template.id + '/' + level.programLevel
+              + (scenarioIndex === 0 ? '' : '/scenario-' + name)
+              + '/' + levelIssue.path,
+          })
+        })
+      })
+    })
+    for (let index = 1; index < levels.length; index += 1) {
+      if (levels[index - 1] && levels[index] && !hasProgression(levels[index - 1], levels[index])) {
+        issues.push(issue('PROGRESSION_MISSING', template.id + '/l' + (index + 1), 'Each adjacent CON level needs an applicable progression variable.'))
+      }
+    }
+
+    if (template.id === 'con5') {
+      const l3 = template.levels.l3
+      const conditioningBlocks = l3?.blocks.filter((block) => block.kind === 'conditioning') ?? []
+      const policy = conditioningBlocks.length === 1 ? conditioningBlocks[0].roundPolicy : undefined
+      if (!policy
+        || policy.standardRounds !== 3
+        || policy.conditionalMaxRounds !== 4
+        || JSON.stringify(policy.conditions ?? []) !== JSON.stringify(['output-stability', 'recovery', 'technique', 'session-time'])) {
+        issues.push(issue('CON05_ROUND_POLICY', 'con5/l3', 'CON05 L3 must use standard 3 rounds and conditional maximum 4 with all approved conditions.'))
+      }
+    } else if (template.levels.l1 || template.levels.l2 || template.levels.l3 || template.levels.l4) {
+      const hasUnexpectedPolicy = (['l1', 'l2', 'l3', 'l4'] as const).some((programLevel) => (
+        template.levels[programLevel]?.blocks.some((block) => block.roundPolicy !== undefined) ?? false
+      ))
+      if (hasUnexpectedPolicy) {
+        issues.push(issue('CON_ROUND_POLICY_INVALID', template.id, 'Only CON05 L3 may declare a conditional round policy.'))
+      }
+    }
+  }
+  return issues
+}
+
 export const auditProgrammingTemplateSet = (
   templates: readonly ProgrammingTemplate[],
 ): AuditIssue[] => {
   const issues: AuditIssue[] = []
   const threeC = templates.filter((template) => template.system === '3c')
   const body = templates.filter((template) => template.system === 'body')
+  const conditioning = templates.filter((template) => template.system === 'conditioning')
   if (threeC.length > 0) issues.push(...audit3CTemplateSet(threeC))
   if (body.length > 0) issues.push(...auditBodyTemplateSet(body))
-  if (templates.some((template) => template.system !== '3c' && template.system !== 'body')) {
+  if (conditioning.length > 0) issues.push(...auditConditioningTemplateSet(conditioning))
+  if (templates.some((template) => template.system !== '3c'
+    && template.system !== 'body'
+    && template.system !== 'conditioning')) {
     issues.push(issue('SYSTEM_INVALID', 'templates', 'Programming templates must use a supported system.'))
   }
   return issues
@@ -1121,6 +1764,270 @@ const STRENGTH_ONLY_PLANNING_SUPPLEMENT_SECONDS: Record<ProgramLevel, number> = 
   l2: 9 * 60,
   l3: 6 * 60,
   l4: 6 * 60,
+}
+
+const requiredPlanningRange = (
+  value: NumericRange | undefined,
+  path: string,
+): NumericRange => {
+  if (!validPlanningRange(value)) {
+    throw new Error(path + '.planningExecutionSeconds: CON requires an atomic planning execution range')
+  }
+  return value as NumericRange
+}
+
+const requiredConditioningRounds = (
+  block: TrainingBlock,
+  path: string,
+): NumericRange => {
+  const rounds = countRange(block.rounds)
+  if (!rounds
+    || rounds.min <= 0
+    || !Number.isInteger(rounds.min)
+    || !Number.isInteger(rounds.max)) {
+    throw new Error(path + '.rounds: CON requires positive integer rounds')
+  }
+  return rounds
+}
+
+const unilateralResetFor = (
+  laterality: Laterality,
+  sideRestSeconds: Count | undefined,
+  occurrences: NumericRange,
+): NumericRange => laterality === 'unilateral' && sideRestSeconds !== undefined
+  ? multiplyRange(toRange(sideRestSeconds), occurrences)
+  : { min: 0, max: 0 }
+
+const estimateConditioningPrep = (level: ResolvedProgrammingLevel): NumericRange => (
+  sumRanges(level.prep.map((item, index) => {
+    const planning = requiredPlanningRange(item.planningExecutionSeconds, 'prep[' + index + ']')
+    return planning
+  }))
+)
+
+const estimateConditioningSpecificBuildUp = (
+  level: ResolvedProgrammingLevel,
+): NumericRange => {
+  const itemTime = sumRanges((level.specificBuildUp ?? []).map((item, index) => {
+    const planning = requiredPlanningRange(item.planningExecutionSeconds, 'specificBuildUp[' + index + ']')
+    const repetitions = countRange(item.prescription.sets) ?? { min: 1, max: 1 }
+    return addRange(
+      addRange(multiplyRange(planning, repetitions), addRange(
+        toRange(item.restAfterSeconds),
+        toRange(item.transitionAfterSeconds),
+      )),
+      unilateralResetFor(
+        item.laterality ?? 'bilateral',
+        item.sideRestSeconds,
+        { min: 1, max: 1 },
+      ),
+    )
+  }))
+  const allowance = toRange(level.planningTime?.buildUpCoachingAllowanceSeconds)
+  return addRange(itemTime, allowance)
+}
+
+const estimateConditioningPowerBlock = (
+  block: TrainingBlock,
+  blockIndex: number,
+): {
+  work: NumericRange
+  recovery: NumericRange
+  unilateralReset: NumericRange
+} => {
+  const exercises = getTrainingExercises(block)
+  const work: NumericRange[] = []
+  const recovery: NumericRange[] = []
+  const unilateralReset: NumericRange[] = []
+
+  exercises.forEach((exercise, exerciseIndex) => {
+    const path = 'blocks[' + blockIndex + '].exercises[' + exerciseIndex + ']'
+    const sets = countRange(exercise.prescription.sets)
+    if (!sets || sets.min <= 0 || !Number.isInteger(sets.min) || !Number.isInteger(sets.max)) {
+      throw new Error(path + '.prescription.sets: CON Power requires positive integer sets')
+    }
+    work.push(multiplyRange(
+      requiredPlanningRange(exercise.planningExecutionSeconds, path),
+      sets,
+    ))
+    const rest = exercise.restSeconds ?? block.restBetweenSetsSeconds
+    if (rest === undefined) {
+      throw new Error(path + '.restSeconds: CON Power requires explicit set recovery')
+    }
+    recovery.push(multiplyRange(toRange(rest), {
+      min: Math.max(0, sets.min - 1),
+      max: Math.max(0, sets.max - 1),
+    }))
+    unilateralReset.push(unilateralResetFor(exercise.laterality, exercise.sideRestSeconds, sets))
+  })
+
+  return {
+    work: sumRanges(work),
+    recovery: sumRanges(recovery),
+    unilateralReset: sumRanges(unilateralReset),
+  }
+}
+
+const estimateConditioningBlock = (
+  block: TrainingBlock,
+  blockIndex: number,
+): {
+  work: NumericRange
+  stationTransitions: NumericRange
+  roundRecovery: NumericRange
+  unilateralReset: NumericRange
+} => {
+  const rounds = requiredConditioningRounds(block, 'blocks[' + blockIndex + ']')
+  const exercises = getTrainingExercises(block)
+  const workPerRound = sumRanges(exercises.map((exercise, exerciseIndex) => (
+    requiredPlanningRange(
+      exercise.planningExecutionSeconds,
+      'blocks[' + blockIndex + '].exercises[' + exerciseIndex + ']',
+    )
+  )))
+  const work = multiplyRange(workPerRound, rounds)
+  const unilateralReset = sumRanges(exercises.map((exercise) => unilateralResetFor(
+    exercise.laterality,
+    exercise.sideRestSeconds,
+    rounds,
+  )))
+
+  const intraRoundTransition = exercises.length > 1
+    ? multiplyRange(
+      toRange(block.transitionSeconds),
+      {
+        min: (exercises.length - 1) * rounds.min,
+        max: (exercises.length - 1) * rounds.max,
+      },
+    )
+    : { min: 0, max: 0 }
+  if (exercises.length > 1 && block.transitionSeconds === undefined) {
+    throw new Error('blocks[' + blockIndex + '].transitionSeconds: CON requires explicit station transition')
+  }
+
+  const interRoundTransition = rounds.max > 1
+    ? multiplyRange(
+      toRange(block.transitionBetweenRoundsSeconds),
+      {
+        min: Math.max(0, rounds.min - 1),
+        max: Math.max(0, rounds.max - 1),
+      },
+    )
+    : { min: 0, max: 0 }
+  if (rounds.max > 1 && block.transitionBetweenRoundsSeconds === undefined) {
+    throw new Error('blocks[' + blockIndex + '].transitionBetweenRoundsSeconds: CON requires explicit inter-round transition')
+  }
+
+  const roundRecovery = rounds.max > 1
+    ? multiplyRange(
+      toRange(block.restBetweenRoundsSeconds),
+      {
+        min: Math.max(0, rounds.min - 1),
+        max: Math.max(0, rounds.max - 1),
+      },
+    )
+    : { min: 0, max: 0 }
+  if (rounds.max > 1 && block.restBetweenRoundsSeconds === undefined) {
+    throw new Error('blocks[' + blockIndex + '].restBetweenRoundsSeconds: CON requires explicit round recovery')
+  }
+
+  return {
+    work,
+    stationTransitions: addRange(intraRoundTransition, interRoundTransition),
+    roundRecovery,
+    unilateralReset,
+  }
+}
+
+const estimateConditioningSessionMinutes = (
+  resolved: ResolvedProgrammingLevel,
+): SessionTimeEstimate => {
+  const prep = estimateConditioningPrep(resolved)
+  const specificBuildUp = estimateConditioningSpecificBuildUp(resolved)
+  const powerBlocks = resolved.blocks
+    .map((block, blockIndex) => block.kind === 'power'
+      ? estimateConditioningPowerBlock(block, blockIndex)
+      : null)
+    .filter((value): value is NonNullable<typeof value> => value !== null)
+  const conditioningBlocks = resolved.blocks
+    .map((block, blockIndex) => block.kind === 'conditioning'
+      ? estimateConditioningBlock(block, blockIndex)
+      : null)
+    .filter((value): value is NonNullable<typeof value> => value !== null)
+
+  const powerWork = sumRanges(powerBlocks.map((block) => block.work))
+  const powerRecovery = sumRanges(powerBlocks.map((block) => block.recovery))
+  const conditioningWork = sumRanges(conditioningBlocks.map((block) => block.work))
+  const stationTransitions = sumRanges(conditioningBlocks.map((block) => block.stationTransitions))
+  const roundRecovery = sumRanges(conditioningBlocks.map((block) => block.roundRecovery))
+  const interBlockTransitions = sumRanges(resolved.blocks.map((block, blockIndex) => {
+    if (block.transitionAfterSeconds === undefined) return { min: 0, max: 0 }
+    return toRange(block.transitionAfterSeconds)
+  }))
+  const unilateralReset = sumRanges([
+    ...resolved.prep.map((item) => unilateralResetFor(
+      item.laterality ?? 'bilateral',
+      item.sideRestSeconds,
+      { min: 1, max: 1 },
+    )),
+    ...powerBlocks.flatMap((block, blockIndex) => {
+      const source = resolved.blocks.filter((candidate) => candidate.kind === 'power')[blockIndex]
+      return source
+        ? getTrainingExercises(source).map((exercise) => unilateralResetFor(
+          exercise.laterality,
+          exercise.sideRestSeconds,
+          countRange(exercise.prescription.sets) ?? { min: 0, max: 0 },
+        ))
+        : []
+    }),
+    ...conditioningBlocks.flatMap((block, blockIndex) => {
+      const source = resolved.blocks.filter((candidate) => candidate.kind === 'conditioning')[blockIndex]
+      return source
+        ? getTrainingExercises(source).map((exercise) => unilateralResetFor(
+          exercise.laterality,
+          exercise.sideRestSeconds,
+          countRange(source.rounds) ?? { min: 0, max: 0 },
+        ))
+        : []
+    }),
+  ])
+  const setupCoachingAllowance = requiredPlanningRange(
+    resolved.planningTime?.setupCoachingAllowanceSeconds,
+    'planningTime.setupCoachingAllowanceSeconds',
+  )
+
+  const components: ConditioningSessionTimeComponentsSeconds = {
+    prep,
+    specificBuildUp,
+    powerWork,
+    powerRecovery,
+    conditioningWork,
+    stationTransitions,
+    roundRecovery,
+    interBlockTransitions,
+    unilateralReset,
+    setupCoachingAllowance,
+  }
+  const totalSeconds = sumRanges(Object.values(components))
+  const transitionTotal = addRange(stationTransitions, interBlockTransitions)
+
+  return {
+    prepMinutes: prep.max / 60,
+    rampUpMinutes: 0,
+    strengthExecutionMinutes: 0,
+    strengthRestMinutes: 0,
+    circuitWorkMinutes: conditioningWork.max / 60,
+    transitionMinutes: transitionTotal.max / 60,
+    roundRestMinutes: roundRecovery.max / 60,
+    unilateralAdjustmentMinutes: unilateralReset.max / 60,
+    equipmentBufferMinutes: 0,
+    planningOverheadMinutes: setupCoachingAllowance.max / 60,
+    totalMinutes: {
+      min: roundMinutes(totalSeconds.min),
+      max: roundMinutes(totalSeconds.max),
+    },
+    conditioningComponentsSeconds: components,
+  }
 }
 
 export const calculatePlanningFloorSeconds = (
@@ -1242,6 +2149,9 @@ export const estimateSessionMinutes = (
   selection?: ProgrammingSelection,
 ): SessionTimeEstimate => {
   const resolved = resolvedLevelFor(level, selection)
+  if (resolved.blocks.some((block) => block.kind === 'power' || block.kind === 'conditioning')) {
+    return estimateConditioningSessionMinutes(resolved)
+  }
   const prep = estimatePrep(resolved)
   const rampUp = estimateRampUp(resolved)
   const strengthBlocks = resolved.blocks.filter((block) => block.kind === 'strength')

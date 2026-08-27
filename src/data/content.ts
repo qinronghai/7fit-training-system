@@ -53,6 +53,7 @@ import { legacyTemplateContentPart3 } from './legacyTemplateContentPart3'
 import { legacyTemplateContentPart4 } from './legacyTemplateContentPart4'
 import { threeCTemplates } from './programming/threeCTemplates'
 import { bodyTemplates } from './programming/bodyTemplates'
+import { conditioningTemplates } from './programming/conditioningTemplates'
 import { resolveProgrammingLevel } from './programming/rules'
 import type {
   Count,
@@ -81,7 +82,9 @@ const allLegacyTemplateContent = {
 } as Record<string, Record<'l1' | 'l2' | 'l3' | 'l4', MigratedTemplateLevel>>
 
 const legacyTemplateContent = Object.fromEntries(
-  Object.entries(allLegacyTemplateContent).filter(([id]) => !id.startsWith('3c') && !id.startsWith('body')),
+  Object.entries(allLegacyTemplateContent).filter(([id]) => (
+    !id.startsWith('3c') && !id.startsWith('body') && !id.startsWith('con')
+  )),
 ) as Record<string, Record<'l1' | 'l2' | 'l3' | 'l4', MigratedTemplateLevel>>
 
 const ppSeeds: Array<[string, string, string, string, string[], string[], string[], [string, string]]> = [
@@ -253,6 +256,18 @@ const toLegacyProgrammingRampUp = (
   ].filter(Boolean).join(' · '),
 })
 
+const toLegacyProgrammingSpecificBuildUp = (
+  item: NonNullable<ProgrammingTemplateLevel['specificBuildUp']>[number],
+): TemplateLevel['warmup'][number] => ({
+  name: item.displayName,
+  tag: 'Specific Build-up',
+  prescription: [
+    formatPrescription(item.prescription, item.laterality),
+    item.restAfterSeconds === undefined ? '' : '恢复 ' + formatCount(item.restAfterSeconds, ' 秒'),
+    item.transitionAfterSeconds === undefined ? '' : '转换 ' + formatCount(item.transitionAfterSeconds, ' 秒'),
+  ].filter(Boolean).join(' · '),
+})
+
 const toLegacyProgrammingExercise = (
   item: TrainingExercise,
   block: ResolvedTrainingBlock,
@@ -262,7 +277,7 @@ const toLegacyProgrammingExercise = (
   prescription: formatPrescription(
     item.prescription,
     item.laterality,
-    block.kind === 'strength'
+    block.kind === 'strength' || block.kind === 'power'
       ? item.restSeconds ?? block.restBetweenSetsSeconds
       : undefined,
   ),
@@ -278,6 +293,34 @@ const sameCount = (left: Count | undefined, right: Count | undefined): boolean =
 const toLegacyProgrammingMetrics = (
   source: ResolvedProgrammingLevel,
 ): TemplateLevel['metrics'] => {
+  const conditioning = source.blocks.find((block) => block.kind === 'conditioning')
+  const power = source.blocks.find((block) => block.kind === 'power')
+  if (conditioning) {
+    const restParts = [
+      power?.restBetweenSetsSeconds === undefined
+        ? ''
+        : 'Power 组间 ' + formatCount(power.restBetweenSetsSeconds, ' 秒'),
+      power?.transitionAfterSeconds === undefined
+        ? ''
+        : 'Power→Conditioning 转换 ' + formatCount(power.transitionAfterSeconds, ' 秒'),
+      conditioning.restBetweenRoundsSeconds === undefined
+        ? ''
+        : '轮间 ' + formatCount(conditioning.restBetweenRoundsSeconds, ' 秒'),
+      source.exercises.some((item) => item.laterality === 'unilateral' && item.sideRestSeconds !== undefined)
+        ? '单侧 reset 按动作处方'
+        : '',
+    ].filter(Boolean)
+    return [
+      { label: '轮数', value: formatCount(conditioning.rounds, ' 轮') },
+      {
+        label: '主观强度',
+        value: source.conditioningIntensityTarget?.rpe === undefined
+          ? '按动作处方'
+          : 'RPE ' + formatCount(source.conditioningIntensityTarget.rpe),
+      },
+      { label: '恢复与转换', value: restParts.join(' · ') || '按动作处方' },
+    ]
+  }
   const circuit = source.blocks.find((block) => block.kind === 'circuit')
   const primary = source.exercises.find((item) => item.role === 'PRIMARY')
   const strengthBlocks = source.blocks.filter((block) => block.kind === 'strength')
@@ -323,6 +366,7 @@ const toLegacyProgrammingLevel = (
     focus: levelNames[levelIndex],
     warmup: [
       ...source.prep.map(toLegacyProgrammingPrep),
+      ...(source.specificBuildUp ?? []).map(toLegacyProgrammingSpecificBuildUp),
       ...source.rampUp.map(toLegacyProgrammingRampUp),
     ],
     exercises: source.blocks.flatMap((block) => (
@@ -355,11 +399,11 @@ const templateSeeds: Array<[string, string, Template['system'], string, string]>
   ['con5', 'CON · 5', 'conditioning', '混合体能', '器械 + 雪橇 + 自由重量 + Carry 综合体能'],
 ]
 
-const programmingTemplates = [...threeCTemplates, ...bodyTemplates]
+const programmingTemplates = [...threeCTemplates, ...bodyTemplates, ...conditioningTemplates]
 const programmingTemplateById = new Map(programmingTemplates.map((template) => [template.id, template]))
 
 export const templates: Template[] = templateSeeds.map(([id, code, system, name, description]) => {
-  const programmingTemplate = system === '3c' || system === 'body' ? programmingTemplateById.get(id) : undefined
+  const programmingTemplate = programmingTemplateById.get(id)
   return {
     id,
     code,
@@ -373,12 +417,18 @@ export const templates: Template[] = templateSeeds.map(([id, code, system, name,
         l3: toLegacyProgrammingLevel(resolveProgrammingLevel(programmingTemplate.levels.l3), 2),
         l4: toLegacyProgrammingLevel(resolveProgrammingLevel(programmingTemplate.levels.l4), 3),
       }
-      : {
-        l1: toTemplateLevel(legacyTemplateContent[id].l1, 0),
-        l2: toTemplateLevel(legacyTemplateContent[id].l2, 1),
-        l3: toTemplateLevel(legacyTemplateContent[id].l3, 2),
-        l4: toTemplateLevel(legacyTemplateContent[id].l4, 3),
-      },
+      : (() => {
+        const legacy = legacyTemplateContent[id]
+        if (!legacy) {
+          throw new Error('No runtime Programming source or legacy fallback exists for template ' + id)
+        }
+        return {
+          l1: toTemplateLevel(legacy.l1, 0),
+          l2: toTemplateLevel(legacy.l2, 1),
+          l3: toTemplateLevel(legacy.l3, 2),
+          l4: toTemplateLevel(legacy.l4, 3),
+        }
+      })(),
   }
 })
 
