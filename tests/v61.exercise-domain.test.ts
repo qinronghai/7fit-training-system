@@ -19,6 +19,13 @@ import {
   programmingExerciseMappings,
   validateProgrammingExerciseMappings,
 } from '../src/data/exercises/programmingMap'
+import {
+  getProgrammingExerciseUsages,
+  getProgrammingExerciseUsagesByScenario,
+  programmingExerciseUsages,
+  programmingUsageScenarios,
+} from '../src/data/exercises/programmingUsage'
+import { resolveProgrammingLevel } from '../src/data/programming/rules'
 
 const PROGRAMMING_KEY_FIELDS = new Set(['exerciseKey', 'optionKey', 'fallbackOptionKey', 'defaultSelection'])
 
@@ -276,5 +283,122 @@ describe('V6.1 Programming exercise mapping contract', () => {
       { code: 'ACTION_STYLE_CANONICAL_ID', exerciseKey: 'action-key', canonicalExerciseId: 'action-001' },
       { code: 'UNKNOWN_CANONICAL_TARGET', exerciseKey: 'missing-target', canonicalExerciseId: 'not-in-registry' },
     ])
+  })
+})
+
+describe('V6.1 non-lossy Programming Usage index', () => {
+  const expectedScenarioIds = [
+    ...['3c1', '3c2', '3c3', '3c4', '3c5', '3c6'].flatMap((templateId) => (
+      ['l1', 'l2', 'l3', 'l4'].map((level) => `${templateId}/${level}/default`)
+    )),
+    ...['body1', 'body2', 'body3', 'body4'].flatMap((templateId) => (
+      ['l1', 'l2', 'l3', 'l4'].map((level) => `${templateId}/${level}/default`)
+    )),
+    ...['l1', 'l2', 'l3', 'l4'].flatMap((level) => [
+      `body5/${level}/default`,
+      `body5/${level}/rope-triceps-pressdown`,
+      `body5/${level}/default-with-complementary`,
+      `body5/${level}/rope-triceps-pressdown-with-complementary`,
+    ]),
+    ...['con1', 'con2', 'con4'].flatMap((templateId) => (
+      ['l1', 'l2', 'l3', 'l4'].map((level) => `${templateId}/${level}/default`)
+    )),
+    'con5/l1/default',
+    'con5/l2/default',
+    'con5/l4/default',
+    'con3/l1/default',
+    'con3/l2/default',
+    'con3/l3/medicine-ball',
+    'con3/l3/swing',
+    'con3/l4/foundation',
+    'con3/l4/swing',
+    'con3/l4/rotational',
+    'con5/l3/standard-3',
+    'con5/l3/conditional-4',
+  ]
+
+  it('indexes exactly 80 deterministic legal scenarios', () => {
+    expect(programmingUsageScenarios).toHaveLength(80)
+    expect(new Set(programmingUsageScenarios.map((scenario) => scenario.scenarioId)).size).toBe(80)
+    expect(new Set(programmingUsageScenarios.map((scenario) => scenario.scenarioId)).size).toBe(expectedScenarioIds.length)
+    expect(new Set(programmingUsageScenarios.map((scenario) => scenario.scenarioId))).toEqual(new Set(expectedScenarioIds))
+  })
+
+  it('indexes only valid canonical identities and preserves scenario membership', () => {
+    const canonicalIds = new Set(exercises.map((exercise) => exercise.id))
+    const scenarioIds = new Set(programmingUsageScenarios.map((scenario) => scenario.scenarioId))
+
+    expect(programmingExerciseUsages.length).toBeGreaterThan(0)
+    for (const usage of programmingExerciseUsages) {
+      expect(canonicalIds.has(usage.exerciseId)).toBe(true)
+      expect(scenarioIds.has(usage.scenarioId)).toBe(true)
+      expect(usage.exerciseKey).toMatch(/^(?!action-\d+$).+/)
+    }
+  })
+
+  it('accounts for every resolved prep, build-up, ramp-up, and training action', () => {
+    const templates = [...threeCTemplates, ...bodyTemplates, ...conditioningTemplates]
+    for (const scenario of programmingUsageScenarios) {
+      const template = templates.find((candidate) => candidate.id === scenario.templateId)!
+      const level = template.levels[scenario.programLevel]
+      const resolved = resolveProgrammingLevel(level, scenario.selection)
+      const actual = [
+        ...resolved.prep.map((item) => ({ kind: 'prep', exerciseKey: item.exerciseKey, prescription: item.prescription })),
+        ...(resolved.specificBuildUp ?? []).map((item) => ({ kind: 'specific-build-up', exerciseKey: item.exerciseKey, prescription: item.prescription })),
+        ...resolved.rampUp.map((item) => ({ kind: 'ramp-up', exerciseKey: item.exerciseKey, prescription: { reps: item.reps } })),
+        ...resolved.blocks.flatMap((block) => block.exercises.map((item) => ({ kind: 'training', exerciseKey: item.exerciseKey, prescription: item.prescription }))),
+      ]
+      const indexed = getProgrammingExerciseUsagesByScenario(scenario.scenarioId)
+        .map((item) => ({
+          kind: item.kind,
+          exerciseKey: item.exerciseKey,
+          prescription: item.kind === 'ramp-up' ? { reps: item.reps } : item.prescription,
+        }))
+
+      expect(indexed).toEqual(actual)
+    }
+  })
+
+  it('preserves Programming roles, preparation phases, and structured prescriptions', () => {
+    const training = programmingExerciseUsages.filter((usage) => usage.kind === 'training')
+    expect(new Set(training.map((usage) => usage.programmingRole))).toEqual(new Set([
+      'PRIMARY', 'SECONDARY', 'UNILATERAL', 'ACCESSORY', 'CORE', 'CARRY', 'POWER', 'CONDITIONING',
+    ]))
+    expect(new Set(programmingExerciseUsages.filter((usage) => usage.kind === 'prep').map((usage) => usage.phase))).toEqual(new Set(['R', 'M', 'A', 'P']))
+    expect(programmingExerciseUsages.some((usage) => usage.kind === 'specific-build-up')).toBe(true)
+    expect(programmingExerciseUsages.some((usage) => usage.kind === 'ramp-up')).toBe(true)
+    expect(training.some((usage) => usage.prescription.sets !== undefined || usage.prescription.reps !== undefined || usage.prescription.distanceMeters !== undefined)).toBe(true)
+    expect(training.every((usage) => !('role' in usage))).toBe(true)
+  })
+
+  it('preserves BODY selectable and complementary scenarios', () => {
+    for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
+      const defaultScenario = getProgrammingExerciseUsagesByScenario(`body5/${level}/default`)
+      const complementaryScenario = getProgrammingExerciseUsagesByScenario(`body5/${level}/default-with-complementary`)
+      expect(defaultScenario.filter((usage) => usage.kind === 'training')).toHaveLength(5)
+      expect(complementaryScenario.filter((usage) => usage.kind === 'training')).toHaveLength(6)
+      expect(complementaryScenario.some((usage) => usage.exerciseKey === 'rope-triceps-pressdown')).toBe(true)
+    }
+  })
+
+  it('preserves all CON03 Power paths and CON05 L3 round paths', () => {
+    expect(getProgrammingExerciseUsagesByScenario('con3/l3/medicine-ball').some((usage) => usage.exerciseKey === 'medicine-ball-slam')).toBe(true)
+    expect(getProgrammingExerciseUsagesByScenario('con3/l3/swing').some((usage) => usage.exerciseKey === 'kb-swing')).toBe(true)
+    expect(getProgrammingExerciseUsagesByScenario('con3/l4/foundation').some((usage) => usage.exerciseKey === 'medicine-ball-slam')).toBe(true)
+    expect(getProgrammingExerciseUsagesByScenario('con3/l4/swing').some((usage) => usage.exerciseKey === 'kb-swing')).toBe(true)
+    expect(getProgrammingExerciseUsagesByScenario('con3/l4/rotational').some((usage) => usage.exerciseKey === 'rotational-throw')).toBe(true)
+
+    const standard = getProgrammingExerciseUsagesByScenario('con5/l3/standard-3')
+    const conditional = getProgrammingExerciseUsagesByScenario('con5/l3/conditional-4')
+    expect(new Set(standard.filter((usage) => usage.kind === 'training').map((usage) => usage.rounds))).toEqual(new Set([3]))
+    expect(new Set(conditional.filter((usage) => usage.kind === 'training').map((usage) => usage.rounds))).toEqual(new Set([4]))
+  })
+
+  it('preserves sled-push contextual Programming semantics under one canonical identity', () => {
+    const sledUsages = getProgrammingExerciseUsages('sled-push')
+    expect(sledUsages.length).toBeGreaterThan(0)
+    expect(sledUsages.every((usage) => usage.exerciseId === 'sled-push')).toBe(true)
+    expect(sledUsages.some((usage) => usage.kind === 'training' && usage.templateId === '3c4' && usage.movementPattern === 'hinge')).toBe(true)
+    expect(sledUsages.some((usage) => usage.kind === 'training' && usage.templateId === 'con2' && usage.movementPattern === 'hpush')).toBe(true)
   })
 })

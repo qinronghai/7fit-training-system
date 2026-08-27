@@ -4,6 +4,7 @@ export * from './types'
 export * from './exercises'
 export * from './aliases'
 export * from './programmingMap'
+export * from './programmingUsage'
 
 export const exerciseDisplayCategoryLabels: Record<ExerciseDisplayCategoryId, string> = {
   lower: '下肢',
