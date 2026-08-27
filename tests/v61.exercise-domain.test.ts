@@ -4,6 +4,7 @@ import {
   buildExerciseNameIndex,
   createProgrammingExerciseResolver,
   exercises,
+  exerciseDisplayCategoryLabels,
   getExercise,
   resolveExerciseId,
   resolveProgrammingExercise,
@@ -67,6 +68,22 @@ describe('V6.1 exercise domain', () => {
   it('resolves aliases to the same canonical exercise', () => {
     expect(resolveExerciseId('臀桥')).toBe('glute-bridge')
     expect(resolveExerciseId('徒手臀桥')).toBe('glute-bridge')
+  })
+
+  it('assigns every canonical Exercise an explicit display taxonomy category', () => {
+    expect(exercises).toHaveLength(92)
+    for (const exercise of exercises) {
+      expect(exercise.displayCategoryId).toBeDefined()
+      expect(exerciseDisplayCategoryLabels[exercise.displayCategoryId]).toBeTruthy()
+    }
+  })
+
+  it('keeps canonical display taxonomy independent from contextual movement patterns', () => {
+    expect(getExercise('sled-push')).toMatchObject({
+      id: 'sled-push',
+      displayCategoryId: 'conditioning',
+      patternIds: ['hpush'],
+    })
   })
 })
 
@@ -165,6 +182,7 @@ describe('V6.1 Programming exercise mapping contract', () => {
       englishName: `${name} English`,
       aliases: [],
       patternIds: ['core'],
+      displayCategoryId: 'core',
       bodyRegions: [],
       primaryMuscles: [],
       secondaryMuscles: [],

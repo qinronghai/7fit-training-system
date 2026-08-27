@@ -14,6 +14,19 @@ export type MovementPatternId =
   | 'carry'
   | 'rotation'
 
+export type ExerciseDisplayCategoryId =
+  | 'lower'
+  | 'glute'
+  | 'pull'
+  | 'push'
+  | 'shoulder'
+  | 'arms'
+  | 'core'
+  | 'carry'
+  | 'power'
+  | 'conditioning'
+  | 'mobility'
+
 export type ExerciseVideo = {
   url: string
   provider: 'youtube' | 'vimeo' | 'website'
@@ -30,6 +43,7 @@ export type Exercise = {
   englishName: string
   aliases: string[]
   patternIds: MovementPatternId[]
+  displayCategoryId: ExerciseDisplayCategoryId
   bodyRegions: string[]
   primaryMuscles: string[]
   secondaryMuscles: string[]

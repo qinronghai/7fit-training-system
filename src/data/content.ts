@@ -30,7 +30,7 @@ export type TemplateLevel = {
   label: string
   focus: string
   warmup: { exerciseId?: string; name: string; tag: string; prescription: string }[]
-  exercises: { exerciseId?: string; name: string; prescription: string; pattern: string }[]
+  exercises: { exerciseId?: string; name: string; prescription: string; pattern: string; displayCategory?: string }[]
   metrics: { label: string; value: string }[]
   sectionTitle: string
   sectionCount: string
@@ -54,7 +54,7 @@ import { legacyTemplateContentPart4 } from './legacyTemplateContentPart4'
 import { threeCTemplates } from './programming/threeCTemplates'
 import { bodyTemplates } from './programming/bodyTemplates'
 import { conditioningTemplates } from './programming/conditioningTemplates'
-import { resolveProgrammingExerciseId } from './exercises'
+import { exerciseDisplayCategoryLabels, getExercise, resolveProgrammingExerciseId } from './exercises'
 import { resolveProgrammingLevel } from './programming/rules'
 import type {
   Count,
@@ -275,18 +275,24 @@ const toLegacyProgrammingSpecificBuildUp = (
 const toLegacyProgrammingExercise = (
   item: TrainingExercise,
   block: ResolvedTrainingBlock,
-): TemplateLevel['exercises'][number] => ({
-  exerciseId: resolveProgrammingExerciseId(item.exerciseKey),
-  name: item.displayName,
-  pattern: programmingPatternLabels[item.movementPattern],
-  prescription: formatPrescription(
-    item.prescription,
-    item.laterality,
-    block.kind === 'strength' || block.kind === 'power'
-      ? item.restSeconds ?? block.restBetweenSetsSeconds
-      : undefined,
-  ),
-})
+): TemplateLevel['exercises'][number] => {
+  const exerciseId = resolveProgrammingExerciseId(item.exerciseKey)
+  const exercise = getExercise(exerciseId)
+  if (!exercise) throw new Error(`Missing canonical exercise for exerciseId: ${exerciseId}`)
+  return {
+    exerciseId,
+    name: item.displayName,
+    pattern: programmingPatternLabels[item.movementPattern],
+    displayCategory: exerciseDisplayCategoryLabels[exercise.displayCategoryId],
+    prescription: formatPrescription(
+      item.prescription,
+      item.laterality,
+      block.kind === 'strength' || block.kind === 'power'
+        ? item.restSeconds ?? block.restBetweenSetsSeconds
+        : undefined,
+    ),
+  }
+}
 
 const sameCount = (left: Count | undefined, right: Count | undefined): boolean => {
   if (left === undefined || right === undefined) return left === right
@@ -471,11 +477,13 @@ const addLibraryAction = (exerciseId: string, name: string, context: string, rol
     if (!presentationActionIndex.has(presentationKey)) presentationActionIndex.set(presentationKey, existing)
     return
   }
+  const exercise = getExercise(exerciseId)
+  if (!exercise) throw new Error(`Missing canonical exercise for library action: ${exerciseId}`)
   const action: LibraryAction = {
     id: `action-${String(++actionSequence).padStart(3, '0')}`,
     exerciseId,
     name,
-    category: role === 'warmup' ? '热身与动作准备' : '普通训练动作',
+    category: exerciseDisplayCategoryLabels[exercise.displayCategoryId],
     context,
     goals: role === 'warmup' ? ['提高体温并建立动作准备'] : ['在模板中完成稳定、可重复的训练刺激'],
     coachCues: ['保持连续呼吸，先确认控制质量，再进入更高强度。', '技术下降或出现不适时，降低复杂度或回到更低等级。'],
