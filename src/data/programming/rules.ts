@@ -1002,6 +1002,33 @@ export const auditConditioningTemplateLevel = (
   validateConditioningPrep(level, issues)
   validateConditioningBlockStructure(level, issues)
   validateConditioningMetadata(level, issues)
+
+  try {
+    const estimate = estimateSessionMinutes(level)
+    const calculatedMax = estimate.totalMinutes.max
+    if (calculatedMax > 60) {
+      issues.push(issue(
+        'TIME_OVER_BUDGET',
+        'calculatedSessionMinutes.max',
+        'Calculated CON session maximum exceeds 60 minutes.',
+      ))
+    }
+    const manualMax = level.estimatedMinutes.max
+    if (!Number.isFinite(manualMax) || manualMax < calculatedMax) {
+      issues.push(issue(
+        'ESTIMATE_MISMATCH',
+        'estimatedMinutes.max',
+        'Manual maximum must cover the calculated CON session maximum.',
+      ))
+    }
+  } catch (error) {
+    issues.push(issue(
+      'CON_TIME_INVALID',
+      'calculatedSessionMinutes',
+      error instanceof Error ? error.message : 'CON session time could not be calculated.',
+    ))
+  }
+
   return issues
 }
 

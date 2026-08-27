@@ -1299,6 +1299,60 @@ describe('Frozen CON 20-level manifest', () => {
     expect(conditional.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 340, max: 600 })
     expect(conditional.totalMinutes.max).toBeGreaterThan(standard.totalMinutes.max)
   })
+
+  it('uses the real resolver and estimator for the legal CON03 path envelope', () => {
+    const l3 = conditioningTemplates.find((template) => template.id === 'con3')!.levels.l3
+    const l4 = conditioningTemplates.find((template) => template.id === 'con3')!.levels.l4
+    const l3Medicine = estimateSessionMinutes(l3).totalMinutes
+    const l3Swing = estimateSessionMinutes(l3, {
+      powerTracks: { 'con3-l3-power': { optionKey: 'kb-swing', techniqueReady: true } },
+    }).totalMinutes
+    const l4Foundation = estimateSessionMinutes(l4).totalMinutes
+    const l4Swing = estimateSessionMinutes(l4, {
+      powerTracks: { 'con3-l4-power': { optionKey: 'kb-swing', techniqueReady: true } },
+    }).totalMinutes
+    const l4Rotational = estimateSessionMinutes(l4, {
+      powerTracks: { 'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true } },
+    }).totalMinutes
+
+    expect(l3Medicine.min).toBeCloseTo(17.67, 1)
+    expect(l3Medicine.max).toBeCloseTo(24.83, 1)
+    expect(l3Swing.min).toBeCloseTo(20.58, 1)
+    expect(l3Swing.max).toBeCloseTo(28.42, 1)
+    expect({ min: Math.min(l3Medicine.min, l3Swing.min), max: Math.max(l3Medicine.max, l3Swing.max) }).toEqual({
+      min: expect.closeTo(17.67, 1),
+      max: expect.closeTo(28.42, 1),
+    })
+
+    expect(l4Foundation.min).toBeCloseTo(18.92, 1)
+    expect(l4Foundation.max).toBeCloseTo(26.08, 1)
+    expect(l4Swing.min).toBeCloseTo(22.33, 1)
+    expect(l4Swing.max).toBeCloseTo(30.17, 1)
+    expect(l4Rotational.min).toBeCloseTo(22.42, 1)
+    expect(l4Rotational.max).toBeCloseTo(30.58, 1)
+    expect({
+      min: Math.min(l4Foundation.min, l4Swing.min, l4Rotational.min),
+      max: Math.max(l4Foundation.max, l4Swing.max, l4Rotational.max),
+    }).toEqual({
+      min: expect.closeTo(18.92, 1),
+      max: expect.closeTo(30.58, 1),
+    })
+  })
+
+  it('does not let a manual estimatedMinutes value bypass the calculated 60-minute gate', () => {
+    const invalid = makeAuditConditioningLevel()
+    invalid.blocks[0] = {
+      ...invalid.blocks[0],
+      exercises: invalid.blocks[0].exercises.map((entry) => ({
+        ...(entry as TrainingExercise),
+        planningExecutionSeconds: { min: 1800, max: 1800 },
+      })),
+    }
+    invalid.estimatedMinutes = { min: 1, max: 60 }
+    expect(auditConditioningTemplateLevel(invalid)).toContainEqual(
+      expect.objectContaining({ code: 'TIME_OVER_BUDGET' }),
+    )
+  })
 })
 
 describe('conditioning resolver', () => {
