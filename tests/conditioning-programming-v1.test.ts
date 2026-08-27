@@ -26,6 +26,8 @@ import {
   auditConditioningTemplateLevel,
   auditConditioningTemplateSet,
   auditProgrammingTemplateSet,
+  calculatePlanningFloorSeconds,
+  estimateSessionMinutes,
   resolveProgrammingLevel,
 } from '../src/data/programming/rules'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
@@ -357,6 +359,24 @@ const makeAuditPowerTrackLevel = (): ProgrammingTemplateLevel => {
   }
 }
 
+const makeAuditMultiStationLevel = (stationCount: number): ProgrammingTemplateLevel => {
+  const level = makeAuditConditioningLevel()
+  level.blocks[0] = {
+    ...level.blocks[0],
+    transitionSeconds: { min: 20, max: 30 },
+    transitionBetweenRoundsSeconds: { min: 15, max: 20 },
+    exercises: Array.from({ length: stationCount }, (_value, index) => (
+      makeAuditConditioningStation(
+        'conditioning-station-' + index,
+        index === stationCount - 1 ? 'CARRY' : 'CONDITIONING',
+        index === stationCount - 1 ? { distanceMeters: 20 } : { durationSeconds: 20 },
+        { min: 20, max: 30 },
+      )
+    )),
+  }
+  return level
+}
+
 describe('conditioning Programming type contract', () => {
   it('accepts the conditioning system and conditioning block kind', () => {
     const system: TrainingSystem = 'conditioning'
@@ -685,6 +705,124 @@ describe('conditioning structural audit', () => {
       primary: { kind: 'pace', scope: 'bout', availability: 'when-available' },
     }
     expect(auditConditioningTemplateLevel(level)).toEqual([])
+  })
+})
+
+describe('conditioning component time estimator', () => {
+  it('uses the resolved selection before calculating the time components', () => {
+    const powerLevel = makeAuditPowerTrackLevel()
+    const estimate = estimateSessionMinutes(powerLevel)
+    const components = estimate.conditioningComponentsSeconds!
+
+    expect(components.powerWork).toEqual({ min: 60, max: 75 })
+    expect(components.powerRecovery).toEqual({ min: 120, max: 120 })
+    expect(components.interBlockTransitions).toEqual({ min: 30, max: 30 })
+    expect(estimate.totalMinutes.max).toBeGreaterThan(0)
+  })
+
+  it('counts four-station transition arithmetic exactly', () => {
+    const estimate = estimateSessionMinutes(makeAuditMultiStationLevel(4))
+    expect(estimate.conditioningComponentsSeconds!.stationTransitions).toEqual({
+      min: 210,
+      max: 310,
+    })
+  })
+
+  it('counts two-station transitions as A→B for each round and B→A between rounds', () => {
+    const estimate = estimateSessionMinutes(makeAuditMultiStationLevel(2))
+    expect(estimate.conditioningComponentsSeconds!.stationTransitions).toEqual({
+      min: 90,
+      max: 130,
+    })
+  })
+
+  it('uses atomic planning ranges for distance and repetition stations', () => {
+    const level = makeAuditConditioningLevel()
+    const estimate = estimateSessionMinutes(level)
+    expect(estimate.conditioningComponentsSeconds!.conditioningWork).toEqual({
+      min: 120,
+      max: 180,
+    })
+  })
+
+  it('counts unilateral active work once for both sides and keeps side reset separate', () => {
+    const level = makeAuditConditioningLevel()
+    const unilateral = level.blocks[0].exercises[0] as TrainingExercise
+    level.blocks[0].exercises[0] = {
+      ...unilateral,
+      laterality: 'unilateral',
+      sideExecution: 'one-side-then-opposite',
+      startingSidePolicy: 'coach-directed',
+      sideRestSeconds: { min: 15, max: 20 },
+      planningExecutionSeconds: { min: 30, max: 40 },
+    }
+    const components = estimateSessionMinutes(level).conditioningComponentsSeconds!
+
+    expect(components.conditioningWork).toEqual({ min: 150, max: 210 })
+    expect(components.unilateralReset).toEqual({ min: 45, max: 60 })
+    expect(components.conditioningWork.max).toBeLessThan(240)
+  })
+
+  it('does not add a unilateral reset for alternating execution without a prescribed reset', () => {
+    const level = makeAuditConditioningLevel()
+    const unilateral = level.blocks[0].exercises[0] as TrainingExercise
+    level.blocks[0].exercises[0] = {
+      ...unilateral,
+      laterality: 'unilateral',
+      sideExecution: 'alternating',
+      startingSidePolicy: 'alternate-between-sets',
+      planningExecutionSeconds: { min: 30, max: 40 },
+    }
+    expect(estimateSessionMinutes(level).conditioningComponentsSeconds!.unilateralReset).toEqual({
+      min: 0,
+      max: 0,
+    })
+  })
+
+  it('keeps Power Recovery, Power-to-Capacity transition, and round recovery distinct', () => {
+    const components = estimateSessionMinutes(makeAuditPowerTrackLevel()).conditioningComponentsSeconds!
+    expect(components.powerRecovery).toEqual({ min: 120, max: 120 })
+    expect(components.interBlockTransitions).toEqual({ min: 30, max: 30 })
+    expect(components.roundRecovery).toEqual({ min: 120, max: 120 })
+    expect(components.stationTransitions).toEqual({ min: 90, max: 90 })
+  })
+
+  it('adds build-up coaching allowance exactly once', () => {
+    const components = estimateSessionMinutes(makeAuditConditioningLevel()).conditioningComponentsSeconds!
+    expect(components.specificBuildUp).toEqual({ min: 45, max: 70 })
+  })
+
+  it('reports zero Power Work and Power Recovery for non-Power CON levels', () => {
+    const components = estimateSessionMinutes(makeAuditConditioningLevel()).conditioningComponentsSeconds!
+    expect(components.powerWork).toEqual({ min: 0, max: 0 })
+    expect(components.powerRecovery).toEqual({ min: 0, max: 0 })
+  })
+
+  it('rejects a CON level that lacks atomic planning time', () => {
+    const level = makeAuditConditioningLevel()
+    level.blocks[0].exercises[0] = {
+      ...(level.blocks[0].exercises[0] as TrainingExercise),
+      planningExecutionSeconds: undefined,
+    }
+    expect(() => estimateSessionMinutes(level)).toThrow(/planningExecutionSeconds/)
+  })
+
+  it('bypasses the generic planning floor for CON', () => {
+    const level = makeAuditConditioningLevel()
+    const estimate = estimateSessionMinutes(level)
+    expect(estimate.totalMinutes.max).toBeLessThan(calculatePlanningFloorSeconds(level) / 60)
+  })
+
+  it('resolves a legal conditional fourth round before estimating', () => {
+    const level = makeAuditConditioningLevel()
+    level.blocks[0] = { ...level.blocks[0], roundPolicy }
+    const standard = estimateSessionMinutes(level)
+    const conditional = estimateSessionMinutes(level, {
+      conditioningRounds: { 'conditioning-main': 4 },
+    })
+    expect(standard.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 120, max: 180 })
+    expect(conditional.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 160, max: 240 })
+    expect(conditional.totalMinutes.max).toBeGreaterThan(standard.totalMinutes.max)
   })
 })
 

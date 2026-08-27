@@ -1,6 +1,7 @@
 import type {
   ConditioningRoundPolicy,
   ConditioningPowerPath,
+  ConditioningSessionTimeComponentsSeconds,
   Count,
   ExercisePrescription,
   ExerciseRole,
@@ -1655,6 +1656,267 @@ const STRENGTH_ONLY_PLANNING_SUPPLEMENT_SECONDS: Record<ProgramLevel, number> = 
   l4: 6 * 60,
 }
 
+const requiredPlanningRange = (
+  value: NumericRange | undefined,
+  path: string,
+): NumericRange => {
+  if (!validPlanningRange(value)) {
+    throw new Error(path + '.planningExecutionSeconds: CON requires an atomic planning execution range')
+  }
+  return value as NumericRange
+}
+
+const requiredConditioningRounds = (
+  block: TrainingBlock,
+  path: string,
+): NumericRange => {
+  const rounds = countRange(block.rounds)
+  if (!rounds
+    || rounds.min <= 0
+    || !Number.isInteger(rounds.min)
+    || !Number.isInteger(rounds.max)) {
+    throw new Error(path + '.rounds: CON requires positive integer rounds')
+  }
+  return rounds
+}
+
+const unilateralResetFor = (
+  laterality: Laterality,
+  sideRestSeconds: Count | undefined,
+  occurrences: NumericRange,
+): NumericRange => laterality === 'unilateral' && sideRestSeconds !== undefined
+  ? multiplyRange(toRange(sideRestSeconds), occurrences)
+  : { min: 0, max: 0 }
+
+const estimateConditioningPrep = (level: ResolvedProgrammingLevel): NumericRange => (
+  sumRanges(level.prep.map((item, index) => {
+    const planning = requiredPlanningRange(item.planningExecutionSeconds, 'prep[' + index + ']')
+    return planning
+  }))
+)
+
+const estimateConditioningSpecificBuildUp = (
+  level: ResolvedProgrammingLevel,
+): NumericRange => {
+  const itemTime = sumRanges((level.specificBuildUp ?? []).map((item, index) => addRange(
+    requiredPlanningRange(item.planningExecutionSeconds, 'specificBuildUp[' + index + ']'),
+    addRange(
+      toRange(item.restAfterSeconds),
+      toRange(item.transitionAfterSeconds),
+    ),
+  )))
+  const allowance = toRange(level.planningTime?.buildUpCoachingAllowanceSeconds)
+  return addRange(itemTime, allowance)
+}
+
+const estimateConditioningPowerBlock = (
+  block: TrainingBlock,
+  blockIndex: number,
+): {
+  work: NumericRange
+  recovery: NumericRange
+  unilateralReset: NumericRange
+} => {
+  const exercises = getTrainingExercises(block)
+  const work: NumericRange[] = []
+  const recovery: NumericRange[] = []
+  const unilateralReset: NumericRange[] = []
+
+  exercises.forEach((exercise, exerciseIndex) => {
+    const path = 'blocks[' + blockIndex + '].exercises[' + exerciseIndex + ']'
+    const sets = countRange(exercise.prescription.sets)
+    if (!sets || sets.min <= 0 || !Number.isInteger(sets.min) || !Number.isInteger(sets.max)) {
+      throw new Error(path + '.prescription.sets: CON Power requires positive integer sets')
+    }
+    work.push(multiplyRange(
+      requiredPlanningRange(exercise.planningExecutionSeconds, path),
+      sets,
+    ))
+    const rest = exercise.restSeconds ?? block.restBetweenSetsSeconds
+    if (rest === undefined) {
+      throw new Error(path + '.restSeconds: CON Power requires explicit set recovery')
+    }
+    recovery.push(multiplyRange(toRange(rest), {
+      min: Math.max(0, sets.min - 1),
+      max: Math.max(0, sets.max - 1),
+    }))
+    unilateralReset.push(unilateralResetFor(exercise.laterality, exercise.sideRestSeconds, sets))
+  })
+
+  return {
+    work: sumRanges(work),
+    recovery: sumRanges(recovery),
+    unilateralReset: sumRanges(unilateralReset),
+  }
+}
+
+const estimateConditioningBlock = (
+  block: TrainingBlock,
+  blockIndex: number,
+): {
+  work: NumericRange
+  stationTransitions: NumericRange
+  roundRecovery: NumericRange
+  unilateralReset: NumericRange
+} => {
+  const rounds = requiredConditioningRounds(block, 'blocks[' + blockIndex + ']')
+  const exercises = getTrainingExercises(block)
+  const workPerRound = sumRanges(exercises.map((exercise, exerciseIndex) => (
+    requiredPlanningRange(
+      exercise.planningExecutionSeconds,
+      'blocks[' + blockIndex + '].exercises[' + exerciseIndex + ']',
+    )
+  )))
+  const work = multiplyRange(workPerRound, rounds)
+  const unilateralReset = sumRanges(exercises.map((exercise) => unilateralResetFor(
+    exercise.laterality,
+    exercise.sideRestSeconds,
+    rounds,
+  )))
+
+  const intraRoundTransition = exercises.length > 1
+    ? multiplyRange(
+      toRange(block.transitionSeconds),
+      {
+        min: (exercises.length - 1) * rounds.min,
+        max: (exercises.length - 1) * rounds.max,
+      },
+    )
+    : { min: 0, max: 0 }
+  if (exercises.length > 1 && block.transitionSeconds === undefined) {
+    throw new Error('blocks[' + blockIndex + '].transitionSeconds: CON requires explicit station transition')
+  }
+
+  const interRoundTransition = rounds.max > 1
+    ? multiplyRange(
+      toRange(block.transitionBetweenRoundsSeconds),
+      {
+        min: Math.max(0, rounds.min - 1),
+        max: Math.max(0, rounds.max - 1),
+      },
+    )
+    : { min: 0, max: 0 }
+  if (rounds.max > 1 && block.transitionBetweenRoundsSeconds === undefined) {
+    throw new Error('blocks[' + blockIndex + '].transitionBetweenRoundsSeconds: CON requires explicit inter-round transition')
+  }
+
+  const roundRecovery = rounds.max > 1
+    ? multiplyRange(
+      toRange(block.restBetweenRoundsSeconds),
+      {
+        min: Math.max(0, rounds.min - 1),
+        max: Math.max(0, rounds.max - 1),
+      },
+    )
+    : { min: 0, max: 0 }
+  if (rounds.max > 1 && block.restBetweenRoundsSeconds === undefined) {
+    throw new Error('blocks[' + blockIndex + '].restBetweenRoundsSeconds: CON requires explicit round recovery')
+  }
+
+  return {
+    work,
+    stationTransitions: addRange(intraRoundTransition, interRoundTransition),
+    roundRecovery,
+    unilateralReset,
+  }
+}
+
+const estimateConditioningSessionMinutes = (
+  resolved: ResolvedProgrammingLevel,
+): SessionTimeEstimate => {
+  const prep = estimateConditioningPrep(resolved)
+  const specificBuildUp = estimateConditioningSpecificBuildUp(resolved)
+  const powerBlocks = resolved.blocks
+    .map((block, blockIndex) => block.kind === 'power'
+      ? estimateConditioningPowerBlock(block, blockIndex)
+      : null)
+    .filter((value): value is NonNullable<typeof value> => value !== null)
+  const conditioningBlocks = resolved.blocks
+    .map((block, blockIndex) => block.kind === 'conditioning'
+      ? estimateConditioningBlock(block, blockIndex)
+      : null)
+    .filter((value): value is NonNullable<typeof value> => value !== null)
+
+  const powerWork = sumRanges(powerBlocks.map((block) => block.work))
+  const powerRecovery = sumRanges(powerBlocks.map((block) => block.recovery))
+  const conditioningWork = sumRanges(conditioningBlocks.map((block) => block.work))
+  const stationTransitions = sumRanges(conditioningBlocks.map((block) => block.stationTransitions))
+  const roundRecovery = sumRanges(conditioningBlocks.map((block) => block.roundRecovery))
+  const interBlockTransitions = sumRanges(resolved.blocks.map((block, blockIndex) => {
+    if (block.transitionAfterSeconds === undefined) return { min: 0, max: 0 }
+    return toRange(block.transitionAfterSeconds)
+  }))
+  const unilateralReset = sumRanges([
+    ...resolved.prep.map((item) => unilateralResetFor(
+      item.laterality ?? 'bilateral',
+      item.sideRestSeconds,
+      { min: 1, max: 1 },
+    )),
+    ...(resolved.specificBuildUp ?? []).map((item) => unilateralResetFor(
+      item.laterality ?? 'bilateral',
+      item.sideRestSeconds,
+      { min: 1, max: 1 },
+    )),
+    ...powerBlocks.flatMap((block, blockIndex) => {
+      const source = resolved.blocks.filter((candidate) => candidate.kind === 'power')[blockIndex]
+      return source
+        ? getTrainingExercises(source).map((exercise) => unilateralResetFor(
+          exercise.laterality,
+          exercise.sideRestSeconds,
+          countRange(exercise.prescription.sets) ?? { min: 0, max: 0 },
+        ))
+        : []
+    }),
+    ...conditioningBlocks.flatMap((block, blockIndex) => {
+      const source = resolved.blocks.filter((candidate) => candidate.kind === 'conditioning')[blockIndex]
+      return source
+        ? getTrainingExercises(source).map((exercise) => unilateralResetFor(
+          exercise.laterality,
+          exercise.sideRestSeconds,
+          countRange(source.rounds) ?? { min: 0, max: 0 },
+        ))
+        : []
+    }),
+  ])
+  const setupCoachingAllowance = requiredPlanningRange(
+    resolved.planningTime?.setupCoachingAllowanceSeconds,
+    'planningTime.setupCoachingAllowanceSeconds',
+  )
+
+  const components: ConditioningSessionTimeComponentsSeconds = {
+    prep,
+    specificBuildUp,
+    powerWork,
+    powerRecovery,
+    conditioningWork,
+    stationTransitions,
+    roundRecovery,
+    interBlockTransitions,
+    unilateralReset,
+    setupCoachingAllowance,
+  }
+  const totalSeconds = sumRanges(Object.values(components))
+  const transitionTotal = addRange(stationTransitions, interBlockTransitions)
+
+  return {
+    prepMinutes: prep.max / 60,
+    rampUpMinutes: 0,
+    strengthExecutionMinutes: 0,
+    strengthRestMinutes: 0,
+    circuitWorkMinutes: conditioningWork.max / 60,
+    transitionMinutes: transitionTotal.max / 60,
+    roundRestMinutes: roundRecovery.max / 60,
+    unilateralAdjustmentMinutes: unilateralReset.max / 60,
+    equipmentBufferMinutes: 0,
+    planningOverheadMinutes: setupCoachingAllowance.max / 60,
+    totalMinutes: {
+      min: totalSeconds.min / 60,
+      max: totalSeconds.max / 60,
+    },
+    conditioningComponentsSeconds: components,
+  }
+}
+
 export const calculatePlanningFloorSeconds = (
   level: ResolvableProgrammingLevel,
   selection?: ProgrammingSelection,
@@ -1774,6 +2036,9 @@ export const estimateSessionMinutes = (
   selection?: ProgrammingSelection,
 ): SessionTimeEstimate => {
   const resolved = resolvedLevelFor(level, selection)
+  if (resolved.blocks.some((block) => block.kind === 'power' || block.kind === 'conditioning')) {
+    return estimateConditioningSessionMinutes(resolved)
+  }
   const prep = estimatePrep(resolved)
   const rampUp = estimateRampUp(resolved)
   const strengthBlocks = resolved.blocks.filter((block) => block.kind === 'strength')
