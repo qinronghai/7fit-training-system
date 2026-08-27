@@ -234,6 +234,9 @@ export const resolveProgrammingLevel = (
   const powerTrackIds = new Set(level.blocks.flatMap((block) => block.exercises
     .filter(isPowerTrackSlot)
     .map((slot) => slot.id)))
+  if (powerTrackIds.size > 0 && selection.includeComplementaryOption === true) {
+    throw new Error('CON Power Track options cannot use BODY complementary selection semantics')
+  }
   const unknownSelectionId = Object.keys(selection.selectable ?? {}).find((slotId) => !slotIds.has(slotId))
   if (unknownSelectionId) {
     throw new Error(`selectable.${unknownSelectionId}: slot does not exist in this Programming level`)

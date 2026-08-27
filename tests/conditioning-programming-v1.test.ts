@@ -21,6 +21,7 @@ import {
   type TrainingSystem,
 } from '../src/data/programming/types'
 import { resolveProgrammingLevel } from '../src/data/programming/rules'
+import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 
 const prep: PrepItem = {
   exerciseKey: 'conditioning-prep',
@@ -385,6 +386,51 @@ describe('conditioning resolver', () => {
 
     expect(standard.blocks[1].rounds).toBe(3)
     expect(conditional.blocks[1].rounds).toBe(4)
+  })
+
+  it('does not treat Power Track options as BODY complementary options', () => {
+    expect(() => resolveProgrammingLevel(l3ResolverFixture, {
+      includeComplementaryOption: true,
+    })).toThrow(/complementary/i)
+  })
+
+  it('rejects an invalid explicit Power Track key without default fallback', () => {
+    expect(() => resolveProgrammingLevel(l3ResolverFixture, {
+      powerTracks: {
+        'con03-power': { optionKey: 'unapproved-power' },
+      },
+    })).toThrow(/not approved/i)
+  })
+
+  it('keeps Foundation Regression outside the peer track options', () => {
+    const l4Slot = makePowerSlot(
+      'foundation-regression',
+      [
+        makePowerOption('kb-swing', 'swing', swingPath, true),
+        makePowerOption('rotational-throw', 'rotational', rotationalPath, true),
+      ],
+      foundationPath,
+    )
+
+    expect(l4Slot.options.map((option) => option.optionKey)).not.toContain('medicine-ball-slam-regression')
+    expect(l4Slot.foundationRegression?.powerExercise.exerciseKey).toBe('medicine-ball-slam-regression')
+  })
+
+  it('accepts only the declared CON05 conditional round count', () => {
+    expect(() => resolveProgrammingLevel(l3ResolverFixture, {
+      conditioningRounds: { 'conditioning-main': 2 },
+    })).toThrow(/approved policy/i)
+    expect(() => resolveProgrammingLevel(l3ResolverFixture, {
+      conditioningRounds: { 'conditioning-main': 5 },
+    })).toThrow(/approved policy/i)
+  })
+
+  it('does not add Power Track fields to BODY resolved levels', () => {
+    const bodyLevel = bodyTemplates.find((template) => template.id === 'body1')!.levels.l1
+    const resolved = resolveProgrammingLevel(bodyLevel)
+
+    expect('powerTrackSelections' in resolved).toBe(false)
+    expect(resolved.exercises.length).toBeGreaterThan(0)
   })
 
   it('returns only TrainingExercise entries after resolving a Power Track slot', () => {
