@@ -1260,6 +1260,45 @@ describe('Frozen CON 20-level manifest', () => {
       conditions: ['output-stability', 'recovery', 'technique', 'session-time'],
     })
   })
+
+  it('resolves and times every legal CON03 L3 and L4 path independently', () => {
+    const con3 = conditioningTemplates.find((template) => template.id === 'con3')!
+    const l3 = con3.levels.l3
+    const l4 = con3.levels.l4
+
+    const l3Medicine = estimateSessionMinutes(l3)
+    const l3Swing = estimateSessionMinutes(l3, {
+      powerTracks: { 'con3-l3-power': { optionKey: 'kb-swing', techniqueReady: true } },
+    })
+    expect(l3Medicine.conditioningComponentsSeconds!.powerWork).toEqual({ min: 45, max: 60 })
+    expect(l3Swing.conditioningComponentsSeconds!.powerWork).toEqual({ min: 100, max: 125 })
+    expect(l3Swing.totalMinutes.min).toBeGreaterThan(l3Medicine.totalMinutes.min)
+    expect(l3Swing.totalMinutes.max).toBeGreaterThan(l3Medicine.totalMinutes.max)
+
+    const l4Foundation = estimateSessionMinutes(l4)
+    const l4Swing = estimateSessionMinutes(l4, {
+      powerTracks: { 'con3-l4-power': { optionKey: 'kb-swing', techniqueReady: true } },
+    })
+    const l4Rotational = estimateSessionMinutes(l4, {
+      powerTracks: { 'con3-l4-power': { optionKey: 'rotational-throw', techniqueReady: true } },
+    })
+    expect(l4Foundation.conditioningComponentsSeconds!.powerWork).toEqual({ min: 45, max: 60 })
+    expect(l4Swing.conditioningComponentsSeconds!.powerWork).toEqual({ min: 100, max: 125 })
+    expect(l4Rotational.conditioningComponentsSeconds!.powerWork).toEqual({ min: 120, max: 160 })
+    expect(l4Rotational.conditioningComponentsSeconds!.unilateralReset).toEqual({ min: 60, max: 80 })
+    expect(l4Rotational.totalMinutes.max).toBeGreaterThan(l4Foundation.totalMinutes.max)
+  })
+
+  it('keeps CON05 L3 standard and conditional round time paths separate', () => {
+    const l3 = conditioningTemplates.find((template) => template.id === 'con5')!.levels.l3
+    const standard = estimateSessionMinutes(l3)
+    const conditional = estimateSessionMinutes(l3, {
+      conditioningRounds: { 'conditioning-main': 4 },
+    })
+    expect(standard.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 255, max: 450 })
+    expect(conditional.conditioningComponentsSeconds!.conditioningWork).toEqual({ min: 340, max: 600 })
+    expect(conditional.totalMinutes.max).toBeGreaterThan(standard.totalMinutes.max)
+  })
 })
 
 describe('conditioning resolver', () => {

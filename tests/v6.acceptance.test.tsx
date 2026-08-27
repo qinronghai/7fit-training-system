@@ -21,6 +21,25 @@ describe('7Fit V6 content contract', () => {
     expect(movementPatterns).toHaveLength(12)
   })
 
+  it('uses resolved conditioning source data instead of historical CON content', () => {
+    const con1L1 = templates.find((template) => template.id === 'con1')!.levels.l1
+    const con3L3 = templates.find((template) => template.id === 'con3')!.levels.l3
+    const con3L4 = templates.find((template) => template.id === 'con3')!.levels.l4
+
+    expect(con1L1.warmup[0]).toMatchObject({ name: 'RowErg', tag: 'Raise' })
+    expect(con1L1.warmup.some((item) => item.tag === 'Specific Build-up')).toBe(true)
+    expect(con1L1.exercises.map((exercise) => exercise.name)).toEqual(['RowErg'])
+    expect(con3L3.exercises.map((exercise) => exercise.name)).toContain('药球下砸')
+    expect(con3L3.exercises.map((exercise) => exercise.name)).not.toContain('划船机')
+    expect(con3L4.exercises.map((exercise) => exercise.name)).toContain('药球下砸')
+  })
+
+  it('keeps CON05 L3 App-facing runtime at the standard three rounds', () => {
+    const con5L3 = templates.find((template) => template.id === 'con5')!.levels.l3
+    expect(con5L3.metrics).toContainEqual({ label: '轮数', value: '3 轮' })
+    expect(con5L3.exercises).toHaveLength(4)
+  })
+
   it('keeps every template level App-compatible after the Programming adapter', () => {
     expect(templates.filter((template) => template.system === '3c')).toHaveLength(6)
     expect(templates.filter((template) => template.system === 'body')).toHaveLength(5)
@@ -47,12 +66,12 @@ describe('7Fit V6 content contract', () => {
   })
 
   it('indexes migrated warmup and main-training actions for direct library lookup', () => {
-    const warmupId = getLibraryActionId('滑雪机轻拉', '升温')
+    const warmupId = getLibraryActionId('SkiErg', '背部 · 垂直拉')
     const mainId = getLibraryActionId('哈克深蹲', '下肢 · 蹲')
     expect(warmupId).toBeTruthy()
     expect(mainId).toBeTruthy()
     expect(libraryActions.length).toBeGreaterThan(40)
-    expect(getLibraryAction(warmupId!)).toMatchObject({ name: '滑雪机轻拉' })
+    expect(getLibraryAction(warmupId!)).toMatchObject({ name: 'SkiErg' })
     expect(getLibraryAction(mainId!)).toMatchObject({ name: '哈克深蹲' })
   })
 
