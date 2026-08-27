@@ -1,9 +1,11 @@
 import type {
+  ConditioningPowerPath,
   Count,
   ExercisePrescription,
   ExerciseRole,
   Laterality,
   NumericRange,
+  PowerTrackSlot,
   ProgramLevel,
   ProgrammingSelection,
   ProgrammingTemplate,
@@ -14,7 +16,7 @@ import type {
   TrainingBlock,
   TrainingExercise,
 } from './types'
-import { getTrainingExercises, isSelectableExerciseSlot } from './types'
+import { getTrainingExercises, isPowerTrackSlot, isSelectableExerciseSlot } from './types'
 
 const DEFAULT_SECONDS_PER_REP = 4
 const DEFAULT_SECONDS_PER_METER = 1
@@ -157,6 +159,71 @@ const resolveSelectableSlot = (
   return { exercises, selectedKey, complementaryIncluded }
 }
 
+type ResolvedPowerTrack = {
+  path: ConditioningPowerPath
+  requestedOptionKey?: string
+  resolvedOptionKey: string
+  mode: 'selected-track' | 'fallback-option' | 'foundation-regression'
+}
+
+const resolvePowerTrackSlot = (
+  slot: PowerTrackSlot,
+  selection: ProgrammingSelection,
+  path: string,
+): ResolvedPowerTrack => {
+  const selected = selection.powerTracks?.[slot.id]
+  const requestedOptionKey = selected?.optionKey
+  const requestedKey = requestedOptionKey ?? slot.defaultSelection
+
+  if (requestedKey === 'foundation-regression') {
+    if (!slot.foundationRegression) {
+      throw new Error(path + ': Foundation Regression is not configured for this Power Track')
+    }
+    return {
+      path: slot.foundationRegression,
+      requestedOptionKey,
+      resolvedOptionKey: slot.foundationRegression.powerExercise.exerciseKey,
+      mode: 'foundation-regression',
+    }
+  }
+
+  const option = slot.options.find((candidate) => candidate.optionKey === requestedKey)
+  if (!option) {
+    throw new Error(path + ': Power Track option "' + requestedKey + '" is not approved for this slot')
+  }
+
+  if (option.requiresTechniqueCompetency && selected?.techniqueReady !== true) {
+    if (slot.fallbackOptionKey) {
+      const fallback = slot.options.find((candidate) => candidate.optionKey === slot.fallbackOptionKey)
+      if (!fallback) {
+        throw new Error(path + ': configured Power Track fallback is not approved for this slot')
+      }
+      return {
+        path: fallback.path,
+        requestedOptionKey,
+        resolvedOptionKey: fallback.path.powerExercise.exerciseKey,
+        mode: 'fallback-option',
+      }
+    }
+    if (slot.foundationRegression) {
+      return {
+        path: slot.foundationRegression,
+        requestedOptionKey,
+        resolvedOptionKey: slot.foundationRegression.powerExercise.exerciseKey,
+        mode: 'foundation-regression',
+      }
+    }
+    throw new Error(path + ': Power Track requires Technique Competency or an approved fallback')
+  }
+
+  return {
+    path: option.path,
+    requestedOptionKey,
+    resolvedOptionKey: option.path.powerExercise.exerciseKey,
+    mode: 'selected-track',
+  }
+}
+
 export const resolveProgrammingLevel = (
   level: ProgrammingTemplateLevel,
   selection: ProgrammingSelection = {},
@@ -164,13 +231,31 @@ export const resolveProgrammingLevel = (
   const slotIds = new Set(level.blocks.flatMap((block) => block.exercises
     .filter(isSelectableExerciseSlot)
     .map((slot) => slot.id)))
+  const powerTrackIds = new Set(level.blocks.flatMap((block) => block.exercises
+    .filter(isPowerTrackSlot)
+    .map((slot) => slot.id)))
   const unknownSelectionId = Object.keys(selection.selectable ?? {}).find((slotId) => !slotIds.has(slotId))
   if (unknownSelectionId) {
     throw new Error(`selectable.${unknownSelectionId}: slot does not exist in this Programming level`)
   }
+  const unknownPowerTrackId = Object.keys(selection.powerTracks ?? {}).find((slotId) => !powerTrackIds.has(slotId))
+  if (unknownPowerTrackId) {
+    throw new Error('powerTracks.' + unknownPowerTrackId + ': slot does not exist in this Programming level')
+  }
+  const conditioningBlockIds = new Set(level.blocks
+    .filter((block) => block.kind === 'conditioning')
+    .map((block) => block.id))
+  const unknownRoundBlockId = Object.keys(selection.conditioningRounds ?? {})
+    .find((blockId) => !conditioningBlockIds.has(blockId))
+  if (unknownRoundBlockId) {
+    throw new Error('conditioningRounds.' + unknownRoundBlockId + ': fixed or unknown conditioning block')
+  }
   const selections: Record<string, string> = {}
+  const powerTrackSelections: NonNullable<ResolvedProgrammingLevel['powerTrackSelections']> = {}
   let optionalIncluded = false
   let complementaryIncluded = false
+  let effectivePrep = level.prep
+  let effectiveSpecificBuildUp = level.specificBuildUp
   const blocks = level.blocks.map((block, blockIndex) => {
     const exercises: TrainingExercise[] = []
     block.exercises.forEach((entry, entryIndex) => {
@@ -185,21 +270,62 @@ export const resolveProgrammingLevel = (
         complementaryIncluded = complementaryIncluded || resolvedSlot.complementaryIncluded
         return
       }
+      if (isPowerTrackSlot(entry)) {
+        const resolvedPowerTrack = resolvePowerTrackSlot(
+          entry,
+          selection,
+          'blocks[' + blockIndex + '].exercises[' + entryIndex + ']',
+        )
+        if (Object.keys(powerTrackSelections).length > 0) {
+          throw new Error('A Conditioning level may resolve only one mutually exclusive Power Track')
+        }
+        effectivePrep = resolvedPowerTrack.path.prep.map((item) => ({ ...item }))
+        effectiveSpecificBuildUp = resolvedPowerTrack.path.specificBuildUp.map((item) => ({ ...item }))
+        powerTrackSelections[entry.id] = {
+          ...(resolvedPowerTrack.requestedOptionKey
+            ? { requestedOptionKey: resolvedPowerTrack.requestedOptionKey }
+            : {}),
+          resolvedOptionKey: resolvedPowerTrack.resolvedOptionKey,
+          mode: resolvedPowerTrack.mode,
+        }
+        exercises.push({ ...resolvedPowerTrack.path.powerExercise })
+        return
+      }
       if (entry.optional === true && selection.includeOptional !== true) return
       if (entry.optional === true) optionalIncluded = true
       exercises.push({ ...entry })
     })
+    const selectedRounds = selection.conditioningRounds?.[block.id]
+    if (selectedRounds !== undefined) {
+      if (!block.roundPolicy) {
+        throw new Error('conditioningRounds.' + block.id + ': this block has no conditional round policy')
+      }
+      const standardRounds = block.roundPolicy.standardRounds
+      const maximumRounds = block.roundPolicy.conditionalMaxRounds ?? standardRounds
+      if (!Number.isInteger(selectedRounds)
+        || selectedRounds !== standardRounds
+        && selectedRounds !== maximumRounds) {
+        throw new Error('conditioningRounds.' + block.id + ': selected rounds are outside the approved policy')
+      }
+      return { ...block, rounds: selectedRounds, exercises }
+    }
     return { ...block, exercises }
   })
 
-  return {
+  const resolved: ResolvedProgrammingLevel = {
     ...level,
+    prep: effectivePrep,
+    ...(effectiveSpecificBuildUp ? { specificBuildUp: effectiveSpecificBuildUp } : {}),
     blocks,
     exercises: blocks.flatMap((block) => block.exercises),
     selections,
     optionalIncluded,
     complementaryIncluded,
   }
+  if (Object.keys(powerTrackSelections).length > 0) {
+    resolved.powerTrackSelections = powerTrackSelections
+  }
+  return resolved
 }
 
 const countValue = (value: Count | undefined, fallback = 0): number => {

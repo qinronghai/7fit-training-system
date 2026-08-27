@@ -2,20 +2,25 @@ import { describe, expect, it } from 'vitest'
 import {
   isPowerTrackSlot,
   isSelectableExerciseSlot,
+  isTrainingExercise,
+  type ConditioningPowerPath,
   type ConditioningOutputPlan,
   type ConditioningPlanningTime,
   type ConditioningRoundPolicy,
   type ExercisePrescription,
   type Laterality,
   type PowerTrackSlot,
+  type PowerTrackOption,
   type PrepItem,
   type ProgrammingSelection,
+  type ProgrammingTemplateLevel,
   type ResolvedTrainingBlock,
   type SpecificBuildUpItem,
   type TrainingBlock,
   type TrainingExercise,
   type TrainingSystem,
 } from '../src/data/programming/types'
+import { resolveProgrammingLevel } from '../src/data/programming/rules'
 
 const prep: PrepItem = {
   exerciseKey: 'conditioning-prep',
@@ -90,6 +95,111 @@ const planningTime: ConditioningPlanningTime = {
   buildUpCoachingAllowanceSeconds: { min: 25, max: 45 },
   setupCoachingAllowanceSeconds: { min: 300, max: 480 },
 }
+
+const makePrep = (key: string, phase: PrepItem['phase']): PrepItem => ({
+  exerciseKey: key,
+  displayName: key,
+  phase,
+  prescription: { reps: 4 },
+  reason: 'conditioning resolver fixture',
+})
+
+const makePath = (prefix: string, exerciseKey: string): ConditioningPowerPath => ({
+  prep: [
+    makePrep(prefix + '-r', 'R'),
+    makePrep(prefix + '-m', 'M'),
+    makePrep(prefix + '-a', 'A'),
+    makePrep(prefix + '-p', 'P'),
+  ],
+  specificBuildUp: [{
+    id: prefix + '-build',
+    order: 1,
+    exerciseKey: prefix + '-build',
+    displayName: prefix + ' build-up',
+    prescription: { durationSeconds: 10 },
+    planningExecutionSeconds: { min: 10, max: 10 },
+  }],
+  powerExercise: {
+    ...powerExercise,
+    exerciseKey,
+    displayName: exerciseKey,
+    prescription: { sets: 3, reps: 5 },
+  },
+})
+
+const makePowerOption = (
+  optionKey: string,
+  trackKey: string,
+  path: ConditioningPowerPath,
+  requiresTechniqueCompetency: boolean,
+): PowerTrackOption => ({
+  optionKey,
+  trackKey,
+  path,
+  requiresTechniqueCompetency,
+})
+
+const makePowerSlot = (
+  defaultSelection: PowerTrackSlot['defaultSelection'],
+  options: PowerTrackOption[],
+  foundationRegression: ConditioningPowerPath,
+  fallbackOptionKey?: string,
+): PowerTrackSlot => ({
+  kind: 'power-track',
+  id: 'con03-power',
+  exerciseKey: 'con03-power-slot',
+  displayName: 'Power Track',
+  role: 'POWER',
+  movementPattern: 'hinge',
+  laterality: 'bilateral',
+  fatigueRisk: 'low',
+  prescription: {},
+  options,
+  defaultSelection,
+  ...(fallbackOptionKey ? { fallbackOptionKey } : {}),
+  foundationRegression,
+})
+
+const makeConditioningLevel = (
+  defaultSelection: PowerTrackSlot['defaultSelection'],
+  options: PowerTrackOption[],
+  foundationRegression: ConditioningPowerPath,
+  fallbackOptionKey?: string,
+): ProgrammingTemplateLevel => ({
+  programLevel: 'l3',
+  primaryGoal: 'resolver fixture',
+  prep: makePath('default', 'medicine-ball-slam').prep,
+  rampUp: [],
+  specificBuildUp: makePath('default', 'medicine-ball-slam').specificBuildUp,
+  blocks: [{
+    id: 'power',
+    kind: 'power',
+    label: 'Power',
+    restBetweenSetsSeconds: 60,
+    transitionAfterSeconds: 30,
+    exercises: [makePowerSlot(defaultSelection, options, foundationRegression, fallbackOptionKey)],
+  }, {
+    ...conditioningBlock,
+    roundPolicy,
+  }],
+  estimatedMinutes: { min: 20, max: 30 },
+  coachNote: 'resolver fixture',
+})
+
+const swingPath = makePath('swing', 'kb-swing')
+const medicineBallPath = makePath('medicine-ball', 'medicine-ball-slam')
+const rotationalPath = makePath('rotational', 'rotational-throw')
+const foundationPath = makePath('foundation', 'medicine-ball-slam-regression')
+
+const l3ResolverFixture = makeConditioningLevel(
+  'medicine-ball-slam',
+  [
+    makePowerOption('kb-swing', 'swing', swingPath, true),
+    makePowerOption('medicine-ball-slam', 'medicine-ball', medicineBallPath, false),
+  ],
+  foundationPath,
+  'medicine-ball-slam',
+)
 
 describe('conditioning Programming type contract', () => {
   it('accepts the conditioning system and conditioning block kind', () => {
@@ -176,5 +286,110 @@ describe('conditioning type contract fixture sanity', () => {
 
     expect(prescription.distanceMeters).toBe(20)
     expect(laterality).toBe('unilateral')
+  })
+})
+
+describe('conditioning resolver', () => {
+  it('resolves the default L3 Medicine Ball path completely', () => {
+    const resolved = resolveProgrammingLevel(l3ResolverFixture)
+
+    expect(resolved.prep.map((item) => item.exerciseKey)).toEqual([
+      'medicine-ball-r',
+      'medicine-ball-m',
+      'medicine-ball-a',
+      'medicine-ball-p',
+    ])
+    expect(resolved.specificBuildUp).toBeDefined()
+    expect(resolved.specificBuildUp![0].exerciseKey).toBe('medicine-ball-build')
+    expect(resolved.blocks[0].exercises[0].exerciseKey).toBe('medicine-ball-slam')
+    expect(resolved.powerTrackSelections?.['con03-power']?.mode).toBe('selected-track')
+  })
+
+  it('resolves an explicit technique-ready Swing path without Medicine Ball work', () => {
+    const resolved = resolveProgrammingLevel(l3ResolverFixture, {
+      powerTracks: {
+        'con03-power': { optionKey: 'kb-swing', techniqueReady: true },
+      },
+    })
+
+    expect(resolved.prep[0].exerciseKey).toBe('swing-r')
+    expect(resolved.specificBuildUp).toBeDefined()
+    expect(resolved.specificBuildUp![0].exerciseKey).toBe('swing-build')
+    expect(resolved.blocks[0].exercises.map((exercise) => exercise.exerciseKey)).toEqual(['kb-swing'])
+    expect(resolved.blocks[0].exercises.some((exercise) => exercise.exerciseKey === 'medicine-ball-slam')).toBe(false)
+  })
+
+  it('uses the separate Foundation Regression as the L4 default path', () => {
+    const l4Fixture = makeConditioningLevel(
+      'foundation-regression',
+      [
+        makePowerOption('kb-swing', 'swing', swingPath, true),
+        makePowerOption('rotational-throw', 'rotational', rotationalPath, true),
+      ],
+      foundationPath,
+    )
+
+    const resolved = resolveProgrammingLevel(l4Fixture)
+
+    expect(resolved.prep[0].exerciseKey).toBe('foundation-r')
+    expect(resolved.specificBuildUp).toBeDefined()
+    expect(resolved.specificBuildUp![0].exerciseKey).toBe('foundation-build')
+    expect(resolved.blocks[0].exercises.map((exercise) => exercise.exerciseKey)).toEqual([
+      'medicine-ball-slam-regression',
+    ])
+    expect(resolved.powerTrackSelections?.['con03-power']?.mode).toBe('foundation-regression')
+  })
+
+  it('resolves each explicit L4 track as one path and never both tracks', () => {
+    const l4Fixture = makeConditioningLevel(
+      'foundation-regression',
+      [
+        makePowerOption('kb-swing', 'swing', swingPath, true),
+        makePowerOption('rotational-throw', 'rotational', rotationalPath, true),
+      ],
+      foundationPath,
+    )
+
+    const swing = resolveProgrammingLevel(l4Fixture, {
+      powerTracks: { 'con03-power': { optionKey: 'kb-swing', techniqueReady: true } },
+    })
+    const rotational = resolveProgrammingLevel(l4Fixture, {
+      powerTracks: { 'con03-power': { optionKey: 'rotational-throw', techniqueReady: true } },
+    })
+
+    expect(swing.blocks[0].exercises.map((exercise) => exercise.exerciseKey)).toEqual(['kb-swing'])
+    expect(rotational.blocks[0].exercises.map((exercise) => exercise.exerciseKey)).toEqual(['rotational-throw'])
+    expect(rotational.blocks[0].exercises).toHaveLength(1)
+  })
+
+  it('falls back to Foundation Regression when an advanced path is not technique-ready', () => {
+    const l4Fixture = makeConditioningLevel(
+      'foundation-regression',
+      [makePowerOption('kb-swing', 'swing', swingPath, true)],
+      foundationPath,
+    )
+
+    const resolved = resolveProgrammingLevel(l4Fixture, {
+      powerTracks: { 'con03-power': { optionKey: 'kb-swing', techniqueReady: false } },
+    })
+
+    expect(resolved.blocks[0].exercises[0].exerciseKey).toBe('medicine-ball-slam-regression')
+    expect(resolved.powerTrackSelections?.['con03-power']?.mode).toBe('foundation-regression')
+  })
+
+  it('resolves CON05 L3 standard and legal conditional round counts', () => {
+    const standard = resolveProgrammingLevel(l3ResolverFixture)
+    const conditional = resolveProgrammingLevel(l3ResolverFixture, {
+      conditioningRounds: { 'conditioning-main': 4 },
+    })
+
+    expect(standard.blocks[1].rounds).toBe(3)
+    expect(conditional.blocks[1].rounds).toBe(4)
+  })
+
+  it('returns only TrainingExercise entries after resolving a Power Track slot', () => {
+    const resolved = resolveProgrammingLevel(l3ResolverFixture)
+
+    expect(resolved.blocks.every((block) => block.exercises.every(isTrainingExercise))).toBe(true)
   })
 })
