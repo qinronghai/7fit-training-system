@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Exercise } from '../src/data/exercises/types'
-import { buildExerciseNameIndex, exercises, getExercise, resolveExerciseId } from '../src/data/exercises'
+import {
+  buildExerciseNameIndex,
+  createProgrammingExerciseResolver,
+  exercises,
+  getExercise,
+  resolveExerciseId,
+  resolveProgrammingExercise,
+  resolveProgrammingExerciseId,
+} from '../src/data/exercises'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
@@ -195,6 +203,37 @@ describe('V6.1 Programming exercise mapping contract', () => {
     ]
 
     expect(new Set(sledKeys.map((key) => lookup.get(key)))).toEqual(new Set(['sled-push']))
+  })
+
+  it('resolves every formal Programming key through the production resolver', () => {
+    for (const exerciseKey of formalProgrammingExerciseKeys()) {
+      const exerciseId = resolveProgrammingExerciseId(exerciseKey)
+      expect(resolveProgrammingExercise(exerciseKey).id).toBe(exerciseId)
+    }
+  })
+
+  it('hard-fails for an unknown Programming key', () => {
+    expect(() => resolveProgrammingExerciseId('not-a-formal-programming-key')).toThrow(
+      'Unknown Programming exerciseKey: not-a-formal-programming-key',
+    )
+  })
+
+  it('hard-fails a resolver whose mapping targets an unknown canonical Exercise', () => {
+    expect(() => createProgrammingExerciseResolver(exercises, [
+      { exerciseKey: 'row-erg', classification: 'canonical', canonicalExerciseId: 'missing-exercise' },
+    ])).toThrow('Invalid Programming exercise mapping')
+  })
+
+  it('does not use display names, aliases, or registry order for identity resolution', () => {
+    const renamedRegistry = exercises.map((exercise) => ({
+      ...exercise,
+      name: exercise.id === 'row-erg' ? '已改名的划船器械' : exercise.name,
+      aliases: exercise.id === 'row-erg' ? [] : exercise.aliases,
+    }))
+    const resolver = createProgrammingExerciseResolver([...renamedRegistry].reverse())
+
+    expect(resolver.resolveId('row-erg')).toBe('row-erg')
+    expect(resolver.resolve('row-erg').name).toBe('已改名的划船器械')
   })
 
   it('reports duplicate source keys as mapping collisions', () => {

@@ -1,4 +1,5 @@
 import type { ExerciseKey } from '../programming/types'
+import type { Exercise } from './types'
 
 export type ProgrammingExerciseKeyClassification = 'canonical' | 'programming-context-variant'
 
@@ -322,4 +323,38 @@ export const createProgrammingExerciseLookup = (
   }
 
   return lookup
+}
+
+export type ProgrammingExerciseResolver = {
+  resolveId: (exerciseKey: ExerciseKey) => string
+  resolve: (exerciseKey: ExerciseKey) => Exercise
+}
+
+export const createProgrammingExerciseResolver = (
+  exerciseRegistry: readonly Exercise[],
+  entries: readonly ProgrammingExerciseMappingEntry[] = programmingExerciseMappings,
+): ProgrammingExerciseResolver => {
+  const canonicalExerciseIds = new Set(exerciseRegistry.map((exercise) => exercise.id))
+  const issues = validateProgrammingExerciseMappings(entries, canonicalExerciseIds)
+
+  if (issues.length > 0) {
+    throw new Error(`Invalid Programming exercise mapping: ${JSON.stringify(issues)}`)
+  }
+
+  const lookup = createProgrammingExerciseLookup(entries)
+  const resolveId = (exerciseKey: ExerciseKey) => {
+    const exerciseId = lookup.get(exerciseKey)
+    if (!exerciseId) throw new Error(`Unknown Programming exerciseKey: ${exerciseKey}`)
+    return exerciseId
+  }
+
+  return {
+    resolveId,
+    resolve: (exerciseKey) => {
+      const exerciseId = resolveId(exerciseKey)
+      const exercise = exerciseRegistry.find((candidate) => candidate.id === exerciseId)
+      if (!exercise) throw new Error(`Unknown canonical Exercise.id: ${exerciseId}`)
+      return exercise
+    },
+  }
 }
