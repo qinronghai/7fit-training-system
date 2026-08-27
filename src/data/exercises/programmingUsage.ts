@@ -212,10 +212,11 @@ const toTrainingUsage = (
   transitionAfterSeconds: block.transitionAfterSeconds,
 })
 
-const bodyScenarioSet = (template: ProgrammingTemplate, programLevel: ProgramLevel): ProgrammingUsageScenario[] => {
+export const buildBodyScenarioSet = (template: ProgrammingTemplate, programLevel: ProgramLevel): ProgrammingUsageScenario[] => {
   const level = template.levels[programLevel]
   const selectableSlots = level.blocks.flatMap((block) => block.exercises)
     .filter(isSelectableExerciseSlot)
+    .sort((left, right) => left.id.localeCompare(right.id))
   if (selectableSlots.length === 0) {
     return [{ scenarioId: `${template.id}/${programLevel}/default`, templateId: template.id, programLevel, selection: {} }]
   }
@@ -233,9 +234,15 @@ const bodyScenarioSet = (template: ProgrammingTemplate, programLevel: ProgramLev
     selection: {},
   }
   const explicitSelections = selections
-    .filter((selection) => Object.values(selection.selectable ?? {}).some((key) => key !== selectableSlots[0]?.defaultOptionKey))
+    .filter((selection) => selectableSlots.some((slot) => {
+      const selectedKey = selection.selectable?.[slot.id]
+      return selectedKey !== undefined && selectedKey !== slot.defaultOptionKey
+    }))
     .map((selection) => {
-      const selectedKey = Object.values(selection.selectable ?? {}).join('-')
+      const selectedKey = Object.entries(selection.selectable ?? {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, key]) => key)
+        .join('-')
       return {
         scenarioId: `${template.id}/${programLevel}/${selectedKey}`,
         templateId: template.id,
@@ -286,7 +293,7 @@ const buildScenarios = (): ProgrammingUsageScenario[] => {
   const scenarios: ProgrammingUsageScenario[] = []
   for (const template of templates) {
     for (const programLevel of ['l1', 'l2', 'l3', 'l4'] as const) {
-      if (template.system === 'body') scenarios.push(...bodyScenarioSet(template, programLevel))
+      if (template.system === 'body') scenarios.push(...buildBodyScenarioSet(template, programLevel))
       else if (template.system === 'conditioning') scenarios.push(...conditioningScenarios(template, programLevel))
       else scenarios.push({
         scenarioId: `${template.id}/${programLevel}/default`,

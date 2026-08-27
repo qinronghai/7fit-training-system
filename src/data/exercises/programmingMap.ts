@@ -116,7 +116,7 @@ export const programmingExerciseMappings: readonly ProgrammingExerciseMappingEnt
   { exerciseKey: 'leg-curl', classification: 'canonical', canonicalExerciseId: 'leg-curl' },
   { exerciseKey: 'leg-extension', classification: 'canonical', canonicalExerciseId: 'leg-extension' },
   { exerciseKey: 'light-farmer-carry', classification: 'programming-context-variant', canonicalExerciseId: 'farmer-carry' },
-  { exerciseKey: 'light-kettlebell-halo', classification: 'programming-context-variant', canonicalExerciseId: 'light-kettlebell-halo' },
+  { exerciseKey: 'light-kettlebell-halo', classification: 'programming-context-variant', canonicalExerciseId: 'kettlebell-halo' },
   { exerciseKey: 'light-sled-push', classification: 'programming-context-variant', canonicalExerciseId: 'sled-push' },
   { exerciseKey: 'low-assistance-pull-up', classification: 'programming-context-variant', canonicalExerciseId: 'assisted-pull-up' },
   { exerciseKey: 'low-box-step-up', classification: 'canonical', canonicalExerciseId: 'low-box-step-up' },

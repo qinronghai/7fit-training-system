@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Exercise } from '../src/data/exercises/types'
+import { isSelectableExerciseSlot } from '../src/data/programming/types'
+import type { ProgrammingTemplate } from '../src/data/programming/types'
 import {
   buildExerciseNameIndex,
   createProgrammingExerciseResolver,
@@ -20,6 +22,7 @@ import {
   validateProgrammingExerciseMappings,
 } from '../src/data/exercises/programmingMap'
 import {
+  buildBodyScenarioSet,
   getProgrammingExerciseUsages,
   getProgrammingExerciseUsagesByScenario,
   programmingExerciseUsages,
@@ -75,6 +78,16 @@ describe('V6.1 exercise domain', () => {
   it('resolves aliases to the same canonical exercise', () => {
     expect(resolveExerciseId('臀桥')).toBe('glute-bridge')
     expect(resolveExerciseId('徒手臀桥')).toBe('glute-bridge')
+  })
+
+  it('keeps load descriptors out of canonical kettlebell halo identity', () => {
+    expect(getExercise('kettlebell-halo')).toMatchObject({
+      id: 'kettlebell-halo',
+      name: '壶铃绕头',
+      englishName: 'Kettlebell Halo',
+    })
+    expect(getExercise('light-kettlebell-halo')).toBeUndefined()
+    expect(resolveProgrammingExerciseId('light-kettlebell-halo')).toBe('kettlebell-halo')
   })
 
   it('assigns every canonical Exercise an explicit display taxonomy category', () => {
@@ -400,5 +413,42 @@ describe('V6.1 non-lossy Programming Usage index', () => {
     expect(sledUsages.every((usage) => usage.exerciseId === 'sled-push')).toBe(true)
     expect(sledUsages.some((usage) => usage.kind === 'training' && usage.templateId === '3c4' && usage.movementPattern === 'hinge')).toBe(true)
     expect(sledUsages.some((usage) => usage.kind === 'training' && usage.templateId === 'con2' && usage.movementPattern === 'hpush')).toBe(true)
+  })
+
+  it('keeps selectable scenario identities stable when slot order changes', () => {
+    const body5 = bodyTemplates.find((template) => template.id === 'body5')!
+    const baseBlock = body5.levels.l1.blocks[0]
+    const selectableSlots = baseBlock.exercises.filter(isSelectableExerciseSlot)
+    expect(selectableSlots).toHaveLength(1)
+    const firstSlot = selectableSlots[0]
+    const secondSlot = {
+      ...firstSlot,
+      id: 'body5-arm-secondary',
+    }
+    const templateWithOrderedSlots = {
+      ...body5,
+      levels: {
+        ...body5.levels,
+        l1: {
+          ...body5.levels.l1,
+          blocks: [{ ...baseBlock, exercises: [firstSlot, secondSlot] }],
+        },
+      },
+    } as ProgrammingTemplate
+    const templateWithReorderedSlots = {
+      ...templateWithOrderedSlots,
+      levels: {
+        ...templateWithOrderedSlots.levels,
+        l1: {
+          ...templateWithOrderedSlots.levels.l1,
+          blocks: [{ ...baseBlock, exercises: [secondSlot, firstSlot] }],
+        },
+      },
+    } as ProgrammingTemplate
+
+    const ordered = buildBodyScenarioSet(templateWithOrderedSlots, 'l1').map((scenario) => scenario.scenarioId)
+    const reordered = buildBodyScenarioSet(templateWithReorderedSlots, 'l1').map((scenario) => scenario.scenarioId)
+
+    expect(reordered).toEqual(ordered)
   })
 })
