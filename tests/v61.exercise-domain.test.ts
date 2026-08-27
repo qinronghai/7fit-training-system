@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { exercises, getExercise, resolveExerciseId } from '../src/data/exercises'
+import type { Exercise } from '../src/data/exercises/types'
+import { buildExerciseNameIndex, exercises, getExercise, resolveExerciseId } from '../src/data/exercises'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
 import {
   createProgrammingExerciseLookup,
+  programmingIdentityDecisions,
   programmingExerciseMappings,
   validateProgrammingExerciseMappings,
 } from '../src/data/exercises/programmingMap'
@@ -89,17 +91,119 @@ describe('V6.1 Programming exercise mapping contract', () => {
 
     expect(lookup.get('floor-glute-bridge')).toBe('glute-bridge')
     expect(lookup.get('heavy-hack-squat')).toBe('hack-squat')
-    expect([...lookup.values()].filter((id) => id === 'glute-bridge')).toHaveLength(2)
+    expect([...lookup.values()].filter((id) => id === 'glute-bridge')).toHaveLength(3)
     expect([...lookup.values()].filter((id) => id === 'hack-squat')).toHaveLength(2)
+  })
+
+  it('resolves all formal Programming keys to reviewed canonical Exercises', () => {
+    const lookup = createProgrammingExerciseLookup(programmingExerciseMappings)
+    const canonicalIds = new Set(exercises.map((exercise) => exercise.id))
+
+    expect(lookup.size).toBe(176)
+    expect(new Set(lookup.values())).toEqual(canonicalIds)
+    for (const canonicalId of lookup.values()) expect(canonicalIds.has(canonicalId)).toBe(true)
+  })
+
+  it('keeps reviewed identity-family decisions explicit', () => {
+    const lookup = createProgrammingExerciseLookup(programmingExerciseMappings)
+    const decisionByFamily = new Map(programmingIdentityDecisions.map((decision) => [decision.family, decision]))
+
+    expect(lookup.get('kb-deadlift')).toBe(lookup.get('kettlebell-deadlift'))
+    expect(lookup.get('kb-rdl')).toBe(lookup.get('kettlebell-rdl'))
+    expect(lookup.get('farmer-carry')).toBe(lookup.get('bilateral-farmer-carry'))
+    expect(lookup.get('band-face-pull')).toBe(lookup.get('face-pull'))
+    expect(lookup.get('lat-pulldown')).toBe(lookup.get('seated-lat-pulldown'))
+    expect(lookup.get('seated-lat-pulldown')).toBe(lookup.get('neutral-grip-lat-pulldown'))
+    expect(lookup.get('straight-arm-pulldown')).toBe(lookup.get('band-straight-arm-pulldown'))
+    expect(lookup.get('band-straight-arm-pulldown')).toBe(lookup.get('cable-pullover'))
+    expect(lookup.get('thoracic-rotation')).toBe(lookup.get('chest-rotation'))
+    expect(lookup.get('chest-rotation')).toBe(lookup.get('chest-t-spine-rotation'))
+    expect(lookup.get('side-lying-open-book')).not.toBe(lookup.get('supine-open-book'))
+
+    expect(decisionByFamily.get('kettlebell-deadlift-abbreviation')?.decision).toBe('same-canonical-exercise')
+    expect(decisionByFamily.get('open-book-position')?.decision).toBe('distinct-canonical-exercise-variant')
+  })
+
+  it('requires reviewed canonical metadata and canonical-only references', () => {
+    const canonicalIds = new Set(exercises.map((exercise) => exercise.id))
+    const validPatterns = new Set([
+      'squat', 'hinge', 'hip', 'single', 'adduction', 'hpush', 'vpush',
+      'hpull', 'vpull', 'core', 'carry', 'rotation',
+    ])
+
+    for (const exercise of exercises) {
+      expect(exercise.id).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      expect(exercise.name.trim()).not.toBe('')
+      expect(exercise.englishName.trim()).not.toBe('')
+      expect(exercise.aliases).toEqual(expect.any(Array))
+      expect(exercise.patternIds.length).toBeGreaterThan(0)
+      expect(exercise.patternIds.every((pattern) => validPatterns.has(pattern))).toBe(true)
+      expect(exercise.equipment.length).toBeGreaterThan(0)
+      expect(exercise.techniqueLevel).toMatch(/^tl[0-4]$/)
+      for (const referencedId of [...exercise.regressions, ...exercise.progressions]) {
+        expect(canonicalIds.has(referencedId)).toBe(true)
+      }
+    }
+  })
+
+  it.each([
+    ['canonical name', (exercise: Exercise) => exercise.name],
+    ['English name', (exercise: Exercise) => exercise.englishName],
+    ['alias', (exercise: Exercise) => exercise.aliases[0]],
+  ])('rejects normalized %s collisions', (_label, conflictingName) => {
+    const minimalExercise = (id: string, name: string): Exercise => ({
+      id,
+      name,
+      englishName: `${name} English`,
+      aliases: [],
+      patternIds: ['core'],
+      bodyRegions: [],
+      primaryMuscles: [],
+      secondaryMuscles: [],
+      equipment: ['自重'],
+      techniqueLevel: 'tl0',
+      goals: [],
+      coachCues: [],
+      commonErrors: [],
+      regressions: [],
+      progressions: [],
+      contraindications: [],
+      riskNotes: [],
+    })
+
+    const first = minimalExercise('first', 'Shared Name')
+    first.aliases = ['First Alias']
+    const second = minimalExercise('second', 'Other Name')
+    second.aliases = ['Second Alias']
+
+    if (_label === 'canonical name') second.name = conflictingName(first)
+    if (_label === 'English name') second.englishName = conflictingName(first)
+    if (_label === 'alias') second.aliases = [conflictingName(first)]
+
+    expect(() => buildExerciseNameIndex([first, second])).toThrow(/Exercise name collision/i)
+  })
+
+  it('maps every sled-push context key to one canonical sled-push id', () => {
+    const lookup = createProgrammingExerciseLookup(programmingExerciseMappings)
+    const sledKeys = [
+      'sled-push',
+      'sled-push-build',
+      'light-sled-push',
+      'moderate-sled-push',
+      'moderate-high-sled-push',
+      'high-control-sled-push',
+    ]
+
+    expect(new Set(sledKeys.map((key) => lookup.get(key)))).toEqual(new Set(['sled-push']))
   })
 
   it('reports duplicate source keys as mapping collisions', () => {
     const duplicate = [
       { exerciseKey: 'row-erg', classification: 'canonical' as const, canonicalExerciseId: 'row-erg' },
-      { exerciseKey: 'row-erg', classification: 'programming-context-variant' as const, canonicalExerciseId: 'row-erg' },
+      { exerciseKey: 'row-erg', classification: 'programming-context-variant' as const, canonicalExerciseId: 'other-row-erg' },
     ]
 
-    expect(validateProgrammingExerciseMappings(duplicate, new Set(['row-erg']))).toEqual([
+    expect(validateProgrammingExerciseMappings(duplicate, new Set(['row-erg', 'other-row-erg']))).toEqual([
       { code: 'DUPLICATE_SOURCE_KEY', exerciseKey: 'row-erg' },
     ])
     expect(() => createProgrammingExerciseLookup(duplicate)).toThrow('Duplicate Programming exerciseKey: row-erg')
