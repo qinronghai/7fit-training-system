@@ -29,8 +29,8 @@ export type ActionEntity = {
 export type TemplateLevel = {
   label: string
   focus: string
-  warmup: { name: string; tag: string; prescription: string }[]
-  exercises: { name: string; prescription: string; pattern: string }[]
+  warmup: { exerciseId?: string; name: string; tag: string; prescription: string }[]
+  exercises: { exerciseId?: string; name: string; prescription: string; pattern: string }[]
   metrics: { label: string; value: string }[]
   sectionTitle: string
   sectionCount: string
@@ -54,6 +54,7 @@ import { legacyTemplateContentPart4 } from './legacyTemplateContentPart4'
 import { threeCTemplates } from './programming/threeCTemplates'
 import { bodyTemplates } from './programming/bodyTemplates'
 import { conditioningTemplates } from './programming/conditioningTemplates'
+import { resolveProgrammingExerciseId } from './exercises'
 import { resolveProgrammingLevel } from './programming/rules'
 import type {
   Count,
@@ -66,8 +67,8 @@ import type {
 } from './programming/types'
 
 type MigratedTemplateLevel = {
-  warmup: readonly { name: string; tag: string; prescription: string }[]
-  exercises: readonly { name: string; pattern: string; prescription: string }[]
+  warmup: readonly { exerciseId?: string; name: string; tag: string; prescription: string }[]
+  exercises: readonly { exerciseId?: string; name: string; pattern: string; prescription: string }[]
   metrics: readonly (readonly [string, string])[]
   sectionTitle: string
   sectionCount: string
@@ -238,6 +239,7 @@ const programmingPatternLabels: Record<TrainingExercise['movementPattern'], stri
 const toLegacyProgrammingPrep = (
   item: ProgrammingTemplateLevel['prep'][number],
 ): TemplateLevel['warmup'][number] => ({
+  exerciseId: resolveProgrammingExerciseId(item.exerciseKey),
   name: item.displayName,
   tag: programmingPrepTags[item.phase],
   prescription: formatPrescription(item.prescription, item.laterality),
@@ -246,6 +248,7 @@ const toLegacyProgrammingPrep = (
 const toLegacyProgrammingRampUp = (
   item: ProgrammingTemplateLevel['rampUp'][number],
 ): TemplateLevel['warmup'][number] => ({
+  exerciseId: resolveProgrammingExerciseId(item.exerciseKey),
   name: item.displayName,
   tag: 'Specific Ramp-up',
   prescription: [
@@ -259,6 +262,7 @@ const toLegacyProgrammingRampUp = (
 const toLegacyProgrammingSpecificBuildUp = (
   item: NonNullable<ProgrammingTemplateLevel['specificBuildUp']>[number],
 ): TemplateLevel['warmup'][number] => ({
+  exerciseId: resolveProgrammingExerciseId(item.exerciseKey),
   name: item.displayName,
   tag: 'Specific Build-up',
   prescription: [
@@ -272,6 +276,7 @@ const toLegacyProgrammingExercise = (
   item: TrainingExercise,
   block: ResolvedTrainingBlock,
 ): TemplateLevel['exercises'][number] => ({
+  exerciseId: resolveProgrammingExerciseId(item.exerciseKey),
   name: item.displayName,
   pattern: programmingPatternLabels[item.movementPattern],
   prescription: formatPrescription(
@@ -433,6 +438,7 @@ export const templates: Template[] = templateSeeds.map(([id, code, system, name,
 })
 
 export type LibraryActionSource = {
+  exerciseId: string
   templateId: string
   templateName: string
   level: Exclude<Level, 'l0'>
@@ -442,6 +448,7 @@ export type LibraryActionSource = {
 
 export type LibraryAction = {
   id: string
+  exerciseId: string
   name: string
   category: string
   context: string
@@ -453,16 +460,20 @@ export type LibraryAction = {
 }
 
 const actionIndex = new Map<string, LibraryAction>()
+const presentationActionIndex = new Map<string, LibraryAction>()
 let actionSequence = 0
-const addLibraryAction = (name: string, context: string, role: LibraryActionSource['role'], source: LibraryActionSource) => {
-  const key = `${role}::${name}::${context}`
+const addLibraryAction = (exerciseId: string, name: string, context: string, role: LibraryActionSource['role'], source: LibraryActionSource) => {
+  const key = `${exerciseId}::${role}::${context}`
+  const presentationKey = `${role}::${name}::${context}`
   const existing = actionIndex.get(key)
   if (existing) {
     existing.sources.push(source)
+    if (!presentationActionIndex.has(presentationKey)) presentationActionIndex.set(presentationKey, existing)
     return
   }
-  actionIndex.set(key, {
+  const action: LibraryAction = {
     id: `action-${String(++actionSequence).padStart(3, '0')}`,
+    exerciseId,
     name,
     category: role === 'warmup' ? '热身与动作准备' : '普通训练动作',
     context,
@@ -471,27 +482,38 @@ const addLibraryAction = (name: string, context: string, role: LibraryActionSour
     regressions: ['减少动作范围', '降低负荷或节奏'],
     progressions: ['增加负荷或动作复杂度', '在不破坏动作质量的前提下提高密度'],
     sources: [source],
-  })
+  }
+  actionIndex.set(key, action)
+  presentationActionIndex.set(presentationKey, action)
 }
 
 for (const template of templates) {
   for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
     const current = template.levels[level]
-    current.warmup.forEach((item) => addLibraryAction(item.name, item.tag, 'warmup', {
-      templateId: template.id, templateName: template.name, level, role: 'warmup', prescription: item.prescription,
-    }))
-    current.exercises.forEach((exercise) => addLibraryAction(exercise.name, exercise.pattern, 'main', {
-      templateId: template.id, templateName: template.name, level, role: 'main', prescription: exercise.prescription,
-    }))
+    current.warmup.forEach((item) => {
+      if (!item.exerciseId) throw new Error(`Missing canonical exerciseId for warmup item: ${item.name}`)
+      addLibraryAction(item.exerciseId, item.name, item.tag, 'warmup', {
+        exerciseId: item.exerciseId,
+        templateId: template.id, templateName: template.name, level, role: 'warmup', prescription: item.prescription,
+      })
+    })
+    current.exercises.forEach((exercise) => {
+      if (!exercise.exerciseId) throw new Error(`Missing canonical exerciseId for exercise item: ${exercise.name}`)
+      addLibraryAction(exercise.exerciseId, exercise.name, exercise.pattern, 'main', {
+        exerciseId: exercise.exerciseId,
+        templateId: template.id, templateName: template.name, level, role: 'main', prescription: exercise.prescription,
+      })
+    })
   }
 }
 
 export const libraryActions = [...actionIndex.values()]
 export const getLibraryAction = (id: string) => libraryActions.find((action) => action.id === id)
+export const getLibraryActionsByExerciseId = (exerciseId: string) => libraryActions.filter((action) => action.exerciseId === exerciseId)
 export const getLibraryActionId = (name: string, context: string, role?: LibraryActionSource['role']) => {
   const roles = role ? [role] : (['warmup', 'main'] as const)
   for (const candidateRole of roles) {
-    const action = actionIndex.get(`${candidateRole}::${name}::${context}`)
+    const action = presentationActionIndex.get(`${candidateRole}::${name}::${context}`)
     if (action) return action.id
   }
   return undefined
