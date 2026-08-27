@@ -1,9 +1,23 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { allRoutes, getLibraryAction, getLibraryActionId, libraryActions, movementPatterns, postpartumMovements, templates } from '../src/data/content'
+import {
+  allRoutes,
+  getLibraryAction,
+  getLibraryActionId,
+  getLibraryActionsByExerciseId,
+  libraryActions,
+  movementPatterns,
+  postpartumMovements,
+  templates,
+} from '../src/data/content'
 import { getRoute } from '../src/lib/router'
 import { buildTemplateCopyText } from '../src/lib/template-copy'
 import { App } from '../src/App'
+import { bodyTemplates } from '../src/data/programming/bodyTemplates'
+import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
+import { threeCTemplates } from '../src/data/programming/threeCTemplates'
+import { exerciseDisplayCategoryLabels, getExercise, resolveProgrammingExerciseId } from '../src/data/exercises'
+import { resolveProgrammingLevel } from '../src/data/programming/rules'
 
 describe('7Fit V6 content contract', () => {
   it('keeps the 66 migrated route pages addressable', () => {
@@ -51,6 +65,75 @@ describe('7Fit V6 content contract', () => {
     }
   })
 
+  it('propagates canonical exercise identity through all 64 Programming levels', () => {
+    const formalTemplates = templates.filter((template) => ['3c', 'body', 'conditioning'].includes(template.system))
+    expect(formalTemplates).toHaveLength(16)
+
+    for (const template of formalTemplates) {
+      for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
+        const current = template.levels[level]
+        expect(current.warmup.every((item) => typeof item.exerciseId === 'string' && item.exerciseId.length > 0)).toBe(true)
+        expect(current.exercises.every((item) => typeof item.exerciseId === 'string' && item.exerciseId.length > 0)).toBe(true)
+      }
+    }
+  })
+
+  it('derives every adapter identity from its Programming exerciseKey', () => {
+    for (const sourceTemplate of [...threeCTemplates, ...bodyTemplates, ...conditioningTemplates]) {
+      const runtimeTemplate = templates.find((template) => template.id === sourceTemplate.id)!
+      for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
+        const resolved = resolveProgrammingLevel(sourceTemplate.levels[level])
+        const expectedWarmupIds = [
+          ...resolved.prep,
+          ...(resolved.specificBuildUp ?? []),
+          ...resolved.rampUp,
+        ].map((item) => resolveProgrammingExerciseId(item.exerciseKey))
+        const expectedExerciseIds = resolved.blocks.flatMap((block) => (
+          block.exercises.map((item) => resolveProgrammingExerciseId(item.exerciseKey))
+        ))
+
+        expect(runtimeTemplate.levels[level].warmup.map((item) => item.exerciseId)).toEqual(expectedWarmupIds)
+        expect(runtimeTemplate.levels[level].exercises.map((item) => item.exerciseId)).toEqual(expectedExerciseIds)
+      }
+    }
+  })
+
+  it('keeps display fields unchanged while adding canonical identity metadata', () => {
+    const hackSquat = templates.find((template) => template.id === 'body1')!.levels.l3
+    const skiErg = templates.find((template) => template.id === 'con1')!.levels.l1
+
+    expect(hackSquat.exercises[0]).toMatchObject({
+      name: '哈克深蹲',
+      pattern: '下肢 · 蹲',
+      prescription: expect.stringContaining('RIR 2'),
+    })
+    expect(skiErg.warmup[0]).toMatchObject({ name: 'RowErg 轻划', tag: 'Raise' })
+    expect(skiErg.exercises[0]).toMatchObject({ name: 'RowErg', pattern: '背部 · 水平拉' })
+  })
+
+  it('derives formal Programming display categories from canonical Exercise metadata', () => {
+    for (const template of templates.filter((template) => ['3c', 'body', 'conditioning'].includes(template.system))) {
+      for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
+        for (const exercise of template.levels[level].exercises) {
+          expect(exercise.displayCategory).toBe(
+            exerciseDisplayCategoryLabels[getExercise(exercise.exerciseId!)!.displayCategoryId],
+          )
+        }
+      }
+    }
+  })
+
+  it('keeps sled-push canonical display separate from contextual Programming pattern', () => {
+    const c3cSled = templates.find((template) => template.id === '3c4')!.levels.l3.exercises
+      .find((exercise) => exercise.exerciseId === 'sled-push')!
+    const conSled = templates.find((template) => template.id === 'con2')!.levels.l1.exercises
+      .find((exercise) => exercise.exerciseId === 'sled-push')!
+
+    expect(c3cSled).toMatchObject({ exerciseId: 'sled-push', displayCategory: '体能', pattern: '后链 · 髋铰链' })
+    expect(conSled).toMatchObject({ exerciseId: 'sled-push', displayCategory: '体能', pattern: '胸部 · 水平推' })
+    expect(getExercise('sled-push')?.id).toBe('sled-push')
+  })
+
   it('uses the resolved BODY default rather than the historical compound BODY content', () => {
     const body05L4 = templates.find((template) => template.id === 'body5')!.levels.l4
     expect(body05L4.exercises).toHaveLength(5)
@@ -75,6 +158,18 @@ describe('7Fit V6 content contract', () => {
     expect(getLibraryAction(mainId!)).toMatchObject({ name: '哈克深蹲' })
   })
 
+  it('indexes library actions by canonical exercise identity without replacing action routes', () => {
+    const sledActions = getLibraryActionsByExerciseId('sled-push')
+    const sledSources = sledActions.flatMap((action) => action.sources)
+
+    expect(sledActions.length).toBeGreaterThan(0)
+    expect(sledActions.every((action) => action.exerciseId === 'sled-push')).toBe(true)
+    expect(sledSources.some((source) => source.templateId === '3c4' && source.exerciseId === 'sled-push')).toBe(true)
+    expect(sledSources.some((source) => source.templateId === 'con2' && source.exerciseId === 'sled-push')).toBe(true)
+    expect(sledActions.every((action) => /^action-\d+$/.test(action.id))).toBe(true)
+    expect(sledActions.every((action) => action.id !== action.exerciseId)).toBe(true)
+  })
+
   it('builds a complete copyable training brief', () => {
     const template = templates.find((item) => item.id === '3c1')!
     const text = buildTemplateCopyText(template, template.levels.l3)
@@ -84,6 +179,30 @@ describe('7Fit V6 content contract', () => {
     expect(text).toContain('Strength Block + 3C Circuit')
     expect(text).toContain('哈克深蹲')
     expect(text).toContain('RIR 2')
+  })
+
+  it('uses canonical display category in formal Programming library actions', () => {
+    const sledActions = getLibraryActionsByExerciseId('sled-push')
+
+    expect(sledActions.length).toBeGreaterThan(0)
+    expect(sledActions.every((action) => action.category === '体能')).toBe(true)
+    expect(sledActions.some((action) => action.context === '后链 · 髋铰链')).toBe(true)
+    expect(sledActions.some((action) => action.context === '胸部 · 水平推')).toBe(true)
+  })
+
+  it('uses canonical display category in App-facing template and copy views', () => {
+    const con2 = templates.find((template) => template.id === 'con2')!
+    const text = buildTemplateCopyText(con2, con2.levels.l1)
+
+    expect(text).toContain('Sled Push｜体能｜')
+    expect(text).not.toContain('Sled Push｜后链 · 髋铰链｜')
+    expect(text).not.toContain('Sled Push｜胸部 · 水平推｜')
+
+    window.location.hash = '#/templates/con2/l1'
+    render(<App />)
+    expect(screen.getByText('体能')).toBeInTheDocument()
+    expect(screen.queryByText('后链 · 髋铰链')).toBeNull()
+    expect(screen.queryByText('胸部 · 水平推')).toBeNull()
   })
 })
 
