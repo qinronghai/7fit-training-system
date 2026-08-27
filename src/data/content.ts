@@ -52,12 +52,15 @@ import { legacyTemplateContentPart2 } from './legacyTemplateContentPart2'
 import { legacyTemplateContentPart3 } from './legacyTemplateContentPart3'
 import { legacyTemplateContentPart4 } from './legacyTemplateContentPart4'
 import { threeCTemplates } from './programming/threeCTemplates'
+import { bodyTemplates } from './programming/bodyTemplates'
+import { resolveProgrammingLevel } from './programming/rules'
 import type {
   Count,
   ExercisePrescription,
   Laterality,
   ProgrammingTemplateLevel,
-  TrainingBlock,
+  ResolvedProgrammingLevel,
+  ResolvedTrainingBlock,
   TrainingExercise,
 } from './programming/types'
 
@@ -78,7 +81,7 @@ const allLegacyTemplateContent = {
 } as Record<string, Record<'l1' | 'l2' | 'l3' | 'l4', MigratedTemplateLevel>>
 
 const legacyTemplateContent = Object.fromEntries(
-  Object.entries(allLegacyTemplateContent).filter(([id]) => !id.startsWith('3c')),
+  Object.entries(allLegacyTemplateContent).filter(([id]) => !id.startsWith('3c') && !id.startsWith('body')),
 ) as Record<string, Record<'l1' | 'l2' | 'l3' | 'l4', MigratedTemplateLevel>>
 
 const ppSeeds: Array<[string, string, string, string, string[], string[], string[], [string, string]]> = [
@@ -252,7 +255,7 @@ const toLegacyProgrammingRampUp = (
 
 const toLegacyProgrammingExercise = (
   item: TrainingExercise,
-  block: TrainingBlock,
+  block: ResolvedTrainingBlock,
 ): TemplateLevel['exercises'][number] => ({
   name: item.displayName,
   pattern: programmingPatternLabels[item.movementPattern],
@@ -265,16 +268,25 @@ const toLegacyProgrammingExercise = (
   ),
 })
 
+const sameCount = (left: Count | undefined, right: Count | undefined): boolean => {
+  if (left === undefined || right === undefined) return left === right
+  const leftRange = typeof left === 'number' ? { min: left, max: left } : left
+  const rightRange = typeof right === 'number' ? { min: right, max: right } : right
+  return leftRange.min === rightRange.min && leftRange.max === rightRange.max
+}
+
 const toLegacyProgrammingMetrics = (
-  source: ProgrammingTemplateLevel,
+  source: ResolvedProgrammingLevel,
 ): TemplateLevel['metrics'] => {
   const circuit = source.blocks.find((block) => block.kind === 'circuit')
-  const primary = source.blocks
-    .flatMap((block) => block.exercises)
-    .find((item) => item.role === 'PRIMARY')
+  const primary = source.exercises.find((item) => item.role === 'PRIMARY')
+  const strengthBlocks = source.blocks.filter((block) => block.kind === 'strength')
+  const strengthRests = strengthBlocks.flatMap((block) => block.exercises.map((item) => item.restSeconds ?? block.restBetweenSetsSeconds))
+  const firstStrengthRest = strengthRests[0]
+  const hasMixedStrengthRests = strengthRests.length > 1
+    && strengthRests.some((rest) => !sameCount(rest, firstStrengthRest))
   const rounds = circuit?.rounds === undefined
-    ? source.blocks
-      .flatMap((block) => block.exercises)
+    ? source.exercises
       .reduce((total, item) => total + (typeof item.prescription.sets === 'number' ? item.prescription.sets : 0), 0) + ' 组'
     : formatCount(circuit.rounds, ' 轮')
   const intensity = primary?.prescription.rpe !== undefined
@@ -284,9 +296,11 @@ const toLegacyProgrammingMetrics = (
       : '按动作处方'
   const rest = circuit?.restBetweenRoundsSeconds !== undefined
     ? '轮间 ' + formatCount(circuit.restBetweenRoundsSeconds, ' 秒')
-    : source.blocks[0]?.restBetweenSetsSeconds === undefined
+    : hasMixedStrengthRests
       ? '按动作处方'
-      : formatCount(source.blocks[0].restBetweenSetsSeconds, ' 秒')
+      : firstStrengthRest === undefined
+      ? '按动作处方'
+      : formatCount(firstStrengthRest, ' 秒')
 
   return [
     { label: '轮数', value: rounds },
@@ -300,7 +314,7 @@ const toLegacyProgrammingParameter = (
 ): string => metrics.map((metric) => metric.label + ' ' + metric.value).join(' · ')
 
 const toLegacyProgrammingLevel = (
-  source: ProgrammingTemplateLevel,
+  source: ResolvedProgrammingLevel,
   levelIndex: number,
 ): TemplateLevel => {
   const metrics = toLegacyProgrammingMetrics(source)
@@ -341,10 +355,11 @@ const templateSeeds: Array<[string, string, Template['system'], string, string]>
   ['con5', 'CON · 5', 'conditioning', '混合体能', '器械 + 雪橇 + 自由重量 + Carry 综合体能'],
 ]
 
-const programmingTemplateById = new Map(threeCTemplates.map((template) => [template.id, template]))
+const programmingTemplates = [...threeCTemplates, ...bodyTemplates]
+const programmingTemplateById = new Map(programmingTemplates.map((template) => [template.id, template]))
 
 export const templates: Template[] = templateSeeds.map(([id, code, system, name, description]) => {
-  const programmingTemplate = system === '3c' ? programmingTemplateById.get(id) : undefined
+  const programmingTemplate = system === '3c' || system === 'body' ? programmingTemplateById.get(id) : undefined
   return {
     id,
     code,
@@ -353,10 +368,10 @@ export const templates: Template[] = templateSeeds.map(([id, code, system, name,
     description,
     levels: programmingTemplate
       ? {
-        l1: toLegacyProgrammingLevel(programmingTemplate.levels.l1, 0),
-        l2: toLegacyProgrammingLevel(programmingTemplate.levels.l2, 1),
-        l3: toLegacyProgrammingLevel(programmingTemplate.levels.l3, 2),
-        l4: toLegacyProgrammingLevel(programmingTemplate.levels.l4, 3),
+        l1: toLegacyProgrammingLevel(resolveProgrammingLevel(programmingTemplate.levels.l1), 0),
+        l2: toLegacyProgrammingLevel(resolveProgrammingLevel(programmingTemplate.levels.l2), 1),
+        l3: toLegacyProgrammingLevel(resolveProgrammingLevel(programmingTemplate.levels.l3), 2),
+        l4: toLegacyProgrammingLevel(resolveProgrammingLevel(programmingTemplate.levels.l4), 3),
       }
       : {
         l1: toTemplateLevel(legacyTemplateContent[id].l1, 0),

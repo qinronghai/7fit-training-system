@@ -1,16 +1,20 @@
 import type {
- Count,
- ExercisePrescription,
+  Count,
+  ExercisePrescription,
   ExerciseRole,
- Laterality,
- NumericRange,
+  Laterality,
+  NumericRange,
   ProgramLevel,
+  ProgrammingSelection,
   ProgrammingTemplate,
- ProgrammingTemplateLevel,
+  ProgrammingTemplateLevel,
+  ResolvedProgrammingLevel,
+  SelectableExerciseSlot,
   SessionTimeEstimate,
   TrainingBlock,
   TrainingExercise,
 } from './types'
+import { getTrainingExercises, isSelectableExerciseSlot } from './types'
 
 const DEFAULT_SECONDS_PER_REP = 4
 const DEFAULT_SECONDS_PER_METER = 1
@@ -20,6 +24,7 @@ const DEFAULT_STRENGTH_REST_SECONDS = 90
 const DEFAULT_ROUND_REST_SECONDS = 75
 const DEFAULT_BLOCK_BUFFER_SECONDS = 45
 const DEFAULT_UNILATERAL_RESET_SECONDS = 10
+const DEFAULT_STRENGTH_TRANSITION_SECONDS = 45
 
 type WorkRange = {
   base: NumericRange
@@ -105,8 +110,97 @@ const generatedExerciseKey = (exerciseKey: string): boolean => (
 )
 
 const allExercises = (level: ProgrammingTemplateLevel): TrainingExercise[] => (
-  level.blocks.flatMap((block) => block.exercises)
+  level.blocks.flatMap(getTrainingExercises)
 )
+
+type ResolvedSlot = {
+  exercises: TrainingExercise[]
+  selectedKey: string
+  complementaryIncluded: boolean
+}
+
+const resolveSelectableSlot = (
+  slot: SelectableExerciseSlot,
+  selection: ProgrammingSelection,
+  path: string,
+): ResolvedSlot => {
+  const explicitKey = selection.selectable?.[slot.id]
+  const selectedKey = explicitKey ?? slot.defaultOptionKey
+  const selected = slot.options.find((option) => option.exerciseKey === selectedKey)
+
+  if (!selected) {
+    throw new Error(`${path}: selectable option "${selectedKey}" is not approved for this slot`)
+  }
+
+  const exercises: TrainingExercise[] = [{ ...selected }]
+  let complementaryIncluded = false
+  if (selection.includeComplementaryOption === true) {
+    const optionKeys = slot.options.map((option) => option.exerciseKey)
+    if (slot.allowComplementaryOption !== true
+      || slot.options.length !== 2
+      || new Set(optionKeys).size !== 2
+      || slot.options.some((option) => option.role !== 'ACCESSORY')) {
+      throw new Error(`${path}: complementary option requires exactly two unique ACCESSORY options`)
+    }
+    const complementary = slot.options.find((option) => option.exerciseKey !== selected.exerciseKey)
+    if (!complementary) {
+      throw new Error(`${path}: complementary option is not uniquely defined`)
+    }
+    exercises.push({
+      ...complementary,
+      optional: true,
+      ...(slot.complementaryCondition ? { optionalCondition: slot.complementaryCondition } : {}),
+    })
+    complementaryIncluded = true
+  }
+
+  return { exercises, selectedKey, complementaryIncluded }
+}
+
+export const resolveProgrammingLevel = (
+  level: ProgrammingTemplateLevel,
+  selection: ProgrammingSelection = {},
+): ResolvedProgrammingLevel => {
+  const slotIds = new Set(level.blocks.flatMap((block) => block.exercises
+    .filter(isSelectableExerciseSlot)
+    .map((slot) => slot.id)))
+  const unknownSelectionId = Object.keys(selection.selectable ?? {}).find((slotId) => !slotIds.has(slotId))
+  if (unknownSelectionId) {
+    throw new Error(`selectable.${unknownSelectionId}: slot does not exist in this Programming level`)
+  }
+  const selections: Record<string, string> = {}
+  let optionalIncluded = false
+  let complementaryIncluded = false
+  const blocks = level.blocks.map((block, blockIndex) => {
+    const exercises: TrainingExercise[] = []
+    block.exercises.forEach((entry, entryIndex) => {
+      if (isSelectableExerciseSlot(entry)) {
+        const resolvedSlot = resolveSelectableSlot(
+          entry,
+          selection,
+          `blocks[${blockIndex}].exercises[${entryIndex}]`,
+        )
+        selections[entry.id] = resolvedSlot.selectedKey
+        exercises.push(...resolvedSlot.exercises)
+        complementaryIncluded = complementaryIncluded || resolvedSlot.complementaryIncluded
+        return
+      }
+      if (entry.optional === true && selection.includeOptional !== true) return
+      if (entry.optional === true) optionalIncluded = true
+      exercises.push({ ...entry })
+    })
+    return { ...block, exercises }
+  })
+
+  return {
+    ...level,
+    blocks,
+    exercises: blocks.flatMap((block) => block.exercises),
+    selections,
+    optionalIncluded,
+    complementaryIncluded,
+  }
+}
 
 const countValue = (value: Count | undefined, fallback = 0): number => {
   if (value === undefined) return fallback
@@ -171,8 +265,12 @@ const validateExercise = (
     if (!alternative.displayName.trim() || forbiddenCompoundName(alternative.displayName)) {
       issues.push(issue('ALTERNATIVE_INVALID', alternativePath + '.displayName', 'Alternative must describe one independent Exercise.'))
     }
-    if (!['equipment', 'member-fit', 'regression', 'coach-choice'].includes(alternative.reason)) {
+    if (!['equipment', 'member-fit', 'regression', 'coach-choice', 'skill-track'].includes(alternative.reason)) {
       issues.push(issue('ALTERNATIVE_INVALID', alternativePath + '.reason', 'Alternative reason is required.'))
+    }
+    if (alternative.reason === 'skill-track'
+      && (alternative.eligibility?.requiresTechniqueCompetency !== true || alternative.preserves?.stimulus !== false)) {
+      issues.push(issue('ALTERNATIVE_INVALID', alternativePath, 'Skill Track alternatives must require technique competency and must not claim identical stimulus.'))
     }
     const preserves = alternative.preserves
     if (!preserves || typeof preserves.primaryGoal !== 'boolean'
@@ -183,15 +281,85 @@ const validateExercise = (
   }
 }
 
+const validateSelectableSlot = (
+  slot: SelectableExerciseSlot,
+  path: string,
+  issues: AuditIssue[],
+): void => {
+  if (!slot.id.trim()) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.id', 'Selectable slot must have a stable id.'))
+  }
+  if (slot.required !== true || slot.selectCount !== 1) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path, 'Selectable slots must require exactly one selection.'))
+  }
+  if (slot.options.length < 1) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.options', 'Selectable slots must define at least one approved option.'))
+    return
+  }
+
+  const optionKeys = slot.options.map((option) => option.exerciseKey)
+  if (new Set(optionKeys).size !== optionKeys.length) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.options', 'Selectable option exercise keys must be unique.'))
+  }
+  if (!slot.options.some((option) => option.exerciseKey === slot.defaultOptionKey)) {
+    issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.defaultOptionKey', 'Default selectable option must belong to the approved option set.'))
+  }
+  slot.options.forEach((option, optionIndex) => {
+    validateExercise(option, path + '.options[' + optionIndex + ']', issues)
+    if (option.role !== 'ACCESSORY') {
+      issues.push(issue('SELECTABLE_SLOT_INVALID', path + '.options[' + optionIndex + '].role', 'Selectable options must resolve as ACCESSORY exercises.'))
+    }
+  })
+
+  if (slot.allowComplementaryOption === true) {
+    if (slot.options.length !== 2) {
+      issues.push(issue('COMPLEMENTARY_SLOT_INVALID', path + '.options', 'Complementary slots must define exactly two approved options.'))
+    }
+    if (new Set(optionKeys).size !== 2) {
+      issues.push(issue('COMPLEMENTARY_SLOT_INVALID', path + '.options', 'Complementary slot options must have unique exercise keys.'))
+    }
+    if (slot.options.some((option) => option.role !== 'ACCESSORY')) {
+      issues.push(issue('COMPLEMENTARY_SLOT_INVALID', path + '.options', 'Both complementary options must use role ACCESSORY.'))
+    }
+  }
+}
+
+const VALID_PROGRESSION_VARIABLES = new Set([
+  'load',
+  'volume',
+  'rir',
+  'rest',
+  'range',
+  'control',
+])
+
+const validateProgressionMetadata = (
+  level: ProgrammingTemplateLevel,
+  issues: AuditIssue[],
+): void => {
+  const progression = level.progressionFromPrevious
+  if (!progression) return
+  if (!Array.isArray(progression.variables)
+    || progression.variables.length === 0
+    || progression.variables.some((variable) => !VALID_PROGRESSION_VARIABLES.has(variable))) {
+    issues.push(issue('PROGRESSION_METADATA_INVALID', 'progressionFromPrevious.variables', 'Progression evidence must name at least one supported progression variable.'))
+  }
+  if (typeof progression.note !== 'string' || !progression.note.trim()) {
+    issues.push(issue('PROGRESSION_METADATA_INVALID', 'progressionFromPrevious.note', 'Progression evidence must include a non-empty design note.'))
+  }
+}
+
 const validatePrepAndRamp = (
   level: ProgrammingTemplateLevel,
   issues: AuditIssue[],
+  requireExplicitPatternPrep = false,
 ): void => {
   if (level.prep.length < 2 || level.prep.length > 4) {
     issues.push(issue('PREP_COUNT', 'prep', 'Prep must contain 2–4 targeted preparation items.'))
   }
-  if (!level.prep.some((item) => item.phase === 'P')) {
-    issues.push(issue('PATTERN_PREP_REQUIRED', 'prep', 'Prep must include a Pattern item.'))
+  if (!level.prep.some((item) => item.phase === 'P')
+    && (requireExplicitPatternPrep || !level.rampUp.some((set) => set.targetRole === 'PRIMARY'))) {
+    issues.push(issue('PATTERN_PREP_REQUIRED', 'prep', 'Pattern preparation must be provided by a P Prep item or a Primary-targeted ramp-up.'))
   }
   level.prep.forEach((item, index) => {
     const path = 'prep[' + index + ']'
@@ -235,12 +403,21 @@ const validateBlockStructure = (
 
   level.blocks.forEach((block, blockIndex) => {
     const path = 'blocks[' + blockIndex + ']'
+    block.exercises.forEach((entry, exerciseIndex) => {
+      if (isSelectableExerciseSlot(entry)) {
+        issues.push(issue(
+          'SELECTABLE_SLOT_FORBIDDEN',
+          path + '.exercises[' + exerciseIndex + ']',
+          '3C blocks must contain TrainingExercise entries, not selectable slots.',
+        ))
+      }
+    })
     if (block.kind === 'circuit') {
       const rounds = countRange(block.rounds)
       if (!rounds || rounds.min <= 0) {
         issues.push(issue('CIRCUIT_ROUNDS', path + '.rounds', 'Circuit Block must define positive rounds.'))
       }
-      block.exercises.forEach((exercise, exerciseIndex) => {
+      getTrainingExercises(block).forEach((exercise, exerciseIndex) => {
         const exercisePath = path + '.exercises[' + exerciseIndex + ']'
         if (exercise.prescription.sets !== undefined) {
           issues.push(issue('CIRCUIT_SETS_FORBIDDEN', exercisePath + '.prescription.sets', 'Circuit work is expressed per round, not action-level sets.'))
@@ -254,7 +431,7 @@ const validateBlockStructure = (
       if (block.rounds !== undefined) {
         issues.push(issue('BLOCK_ORDER', path + '.rounds', 'Strength Block cannot use circuit rounds.'))
       }
-      block.exercises.forEach((exercise, exerciseIndex) => {
+      getTrainingExercises(block).forEach((exercise, exerciseIndex) => {
         if (countRange(exercise.prescription.sets) === null) {
           issues.push(issue('STRENGTH_SETS_REQUIRED', path + '.exercises[' + exerciseIndex + '].prescription.sets', 'Strength actions must define sets.'))
         }
@@ -268,9 +445,10 @@ const validateFatigueStack = (
   issues: AuditIssue[],
 ): void => {
   level.blocks.forEach((block, blockIndex) => {
-    for (let index = 1; index < block.exercises.length; index += 1) {
-      const previous = block.exercises[index - 1]
-      const current = block.exercises[index]
+    const exercises = getTrainingExercises(block)
+    for (let index = 1; index < exercises.length; index += 1) {
+      const previous = exercises[index - 1]
+      const current = exercises[index]
       if (previous.fatigueRisk === 'high'
         && current.fatigueRisk === 'high'
         && previous.movementPattern === current.movementPattern) {
@@ -284,8 +462,9 @@ const validateFatigueStack = (
   })
 }
 
-export const auditTemplateLevel = (
+export const auditSharedTemplateLevel = (
   level: ProgrammingTemplateLevel,
+  options: { requireExplicitPatternPrep?: boolean } = {},
 ): AuditIssue[] => {
   const issues: AuditIssue[] = []
   if (!level.primaryGoal.trim()) {
@@ -298,14 +477,30 @@ export const auditTemplateLevel = (
     issues.push(issue('PRIMARY_COUNT', 'blocks', 'Every level must contain exactly one PRIMARY exercise.'))
   }
   formalExercises.forEach((exercise, index) => validateExercise(exercise, 'exercise[' + index + ']', issues))
-  validatePrepAndRamp(level, issues)
-  validateBlockStructure(level, issues)
+  level.blocks.forEach((block, blockIndex) => {
+    block.exercises.forEach((entry, entryIndex) => {
+      if (isSelectableExerciseSlot(entry)) {
+        validateSelectableSlot(entry, 'blocks[' + blockIndex + '].exercises[' + entryIndex + ']', issues)
+      }
+    })
+  })
+  validatePrepAndRamp(level, issues, options.requireExplicitPatternPrep === true)
   validateFatigueStack(level, issues)
+  validateProgressionMetadata(level, issues)
 
   const unilateralCount = formalExercises.filter((exercise) => exercise.laterality === 'unilateral').length
   if (unilateralCount > 5) {
     issues.push(issue('UNILATERAL_COUNT', 'blocks', 'The fixed template must not accumulate excessive unilateral demands.'))
   }
+
+  return issues
+}
+
+export const audit3CTemplateLevel = (
+  level: ProgrammingTemplateLevel,
+): AuditIssue[] => {
+  const issues = auditSharedTemplateLevel(level, { requireExplicitPatternPrep: true })
+  validateBlockStructure(level, issues)
 
   const estimate = estimateSessionMinutes(level)
   if (estimate.totalMinutes.max > 60) {
@@ -321,6 +516,9 @@ export const auditTemplateLevel = (
 
   return issues
 }
+
+// Preserve the Phase 1 public API for callers that audit a 3C level directly.
+export const auditTemplateLevel = audit3CTemplateLevel
 
 const normalizeCount = (value: Count | undefined): NumericRange | null => {
   if (value === undefined) return null
@@ -371,7 +569,9 @@ const matchesExerciseBlock = (
   blockIndex: number,
   expected: readonly ExerciseExpectation[],
 ): boolean => {
-  const actual = level.blocks[blockIndex]?.exercises
+  const actual = level.blocks[blockIndex]
+    ? getTrainingExercises(level.blocks[blockIndex])
+    : undefined
   return Boolean(
     actual
     && actual.length === expected.length
@@ -433,7 +633,7 @@ const validateSpecialCases = (
     if (!matchesExerciseBlock(l1, 0, expectedL1Exercises)) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l1', '3C03 L1 must use one supported split squat plus row, chest press, bilateral Farmer Carry and dead bug.'))
     }
-    if (l1.blocks[0]?.exercises.filter((exercise) => exercise.movementPattern === 'single').length !== 1) {
+    if (l1.blocks[0] && getTrainingExercises(l1.blocks[0]).filter((exercise) => exercise.movementPattern === 'single').length !== 1) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l1', '3C03 L1 may contain only one knee-dominant single-leg action.'))
     }
 
@@ -478,7 +678,7 @@ const validateSpecialCases = (
       || l4Rounds?.min !== 2
       || l4Rounds?.max !== 3
       || !sameCount(l4Circuit?.restBetweenRoundsSeconds, 90)
-      || (l4Circuit?.exercises ?? []).some((exercise) => exercise.prescription.sets !== undefined)) {
+      || (l4Circuit ? getTrainingExercises(l4Circuit).some((exercise) => exercise.prescription.sets !== undefined) : false)) {
       issues.push(issue('SPECIAL_CASE', template.id + '/l4', '3C03 L4 must use the frozen Strength plus three-action Circuit prescription.'))
     }
   }
@@ -522,7 +722,7 @@ const validateSpecialCases = (
         prescription: { distanceMeters: { min: 20, max: 30 } },
       },
     ]
-    const primaryAlternative = l4.blocks[0]?.exercises[0]?.alternatives?.[0]
+    const primaryAlternative = l4.blocks[0] ? getTrainingExercises(l4.blocks[0])[0]?.alternatives?.[0] : undefined
     const alternativeValid = primaryAlternative?.exerciseKey === 'double-kettlebell-rdl'
       && primaryAlternative.reason === 'equipment'
       && primaryAlternative.preserves.primaryGoal === true
@@ -558,7 +758,7 @@ const validateTemplateSetShape = (
   })
 }
 
-export const auditTemplateSet = (
+export const audit3CTemplateSet = (
   templates: readonly ProgrammingTemplate[],
 ): AuditIssue[] => {
   const issues: AuditIssue[] = []
@@ -571,7 +771,7 @@ export const auditTemplateSet = (
         issues.push(issue('LEVEL_SET', template.id, 'Template level is missing.'))
         return
       }
-      for (const levelIssue of auditTemplateLevel(level)) {
+      for (const levelIssue of audit3CTemplateLevel(level)) {
         issues.push({
           ...levelIssue,
           path: template.id + '/' + level.programLevel + '/' + levelIssue.path,
@@ -597,12 +797,273 @@ export const auditTemplateSet = (
   return issues
 }
 
+// Preserve the Phase 1 public API for the 3C source set.
+export const auditTemplateSet = audit3CTemplateSet
+
 const sumRanges = (ranges: NumericRange[]): NumericRange => ranges.reduce(
   (total, range) => addRange(total, range),
   { min: 0, max: 0 },
 )
 
-const workRange = (prescription: ExercisePrescription, laterality?: Laterality): WorkRange => {
+type ResolvableProgrammingLevel = ProgrammingTemplateLevel | ResolvedProgrammingLevel
+
+const isResolvedProgrammingLevel = (
+  level: ResolvableProgrammingLevel,
+): level is ResolvedProgrammingLevel => 'selections' in level
+
+const resolvedLevelFor = (
+  level: ResolvableProgrammingLevel,
+  selection?: ProgrammingSelection,
+): ResolvedProgrammingLevel => (
+  isResolvedProgrammingLevel(level) ? level : resolveProgrammingLevel(level, selection)
+)
+
+export const calculateWorkingSetEstimate = (
+  level: ResolvableProgrammingLevel,
+  selection?: ProgrammingSelection,
+): NumericRange => {
+  const resolved = resolvedLevelFor(level, selection)
+  return sumRanges(resolved.exercises.map((exercise) => toRange(exercise.prescription.sets, 1)))
+}
+
+// Descriptive alias for callers that prefer the metric's full name.
+export const calculateTotalWorkingSets = calculateWorkingSetEstimate
+
+const bodySelectionScenarios = (
+  level: ProgrammingTemplateLevel,
+): ProgrammingSelection[] => {
+  const slots = level.blocks.flatMap((block) => block.exercises.filter(isSelectableExerciseSlot))
+  const fixedOptional = level.blocks.some((block) => getTrainingExercises(block).some((exercise) => exercise.optional === true))
+  let scenarios: ProgrammingSelection[] = [{}]
+
+  for (const slot of slots) {
+    scenarios = scenarios.flatMap((scenario) => slot.options.map((option) => ({
+      ...scenario,
+      selectable: {
+        ...(scenario.selectable ?? {}),
+        [slot.id]: option.exerciseKey,
+      },
+    })))
+  }
+
+  if (slots.some((slot) => slot.allowComplementaryOption === true)) {
+    scenarios = scenarios.flatMap((scenario) => [
+      scenario,
+      { ...scenario, includeComplementaryOption: true },
+    ])
+  }
+  if (fixedOptional) {
+    scenarios = scenarios.flatMap((scenario) => [
+      scenario,
+      { ...scenario, includeOptional: true },
+    ])
+  }
+  return scenarios
+}
+
+const validateBodyBlockStructure = (
+  level: ProgrammingTemplateLevel,
+  issues: AuditIssue[],
+): void => {
+  if (level.blocks.length !== 1 || level.blocks[0]?.kind !== 'strength') {
+    issues.push(issue('BODY_BLOCK_STRUCTURE', 'blocks', 'BODY must contain one Strength / Volume Block.'))
+  }
+  level.blocks.forEach((block, blockIndex) => {
+    const path = 'blocks[' + blockIndex + ']'
+    if (block.kind === 'circuit') {
+      issues.push(issue('BODY_CIRCUIT_FORBIDDEN', path, 'BODY does not use Circuit Blocks.'))
+    }
+    if (block.kind === 'strength') {
+      if (block.rounds !== undefined) {
+        issues.push(issue('BODY_BLOCK_STRUCTURE', path + '.rounds', 'BODY Strength Block cannot define circuit rounds.'))
+      }
+      getTrainingExercises(block).forEach((exercise, exerciseIndex) => {
+        if (countRange(exercise.prescription.sets) === null) {
+          issues.push(issue('STRENGTH_SETS_REQUIRED', path + '.exercises[' + exerciseIndex + '].prescription.sets', 'BODY Strength actions must define sets.'))
+        }
+      })
+      block.exercises.forEach((entry, entryIndex) => {
+        if (isSelectableExerciseSlot(entry)) {
+          entry.options.forEach((option, optionIndex) => {
+            if (countRange(option.prescription.sets) === null) {
+              issues.push(issue('STRENGTH_SETS_REQUIRED', path + '.exercises[' + entryIndex + '].options[' + optionIndex + '].prescription.sets', 'BODY selectable Strength options must define sets.'))
+            }
+          })
+        }
+      })
+    }
+  })
+}
+
+export const auditBodyTemplateLevel = (
+  level: ProgrammingTemplateLevel,
+  selection?: ProgrammingSelection,
+): AuditIssue[] => {
+  const issues = auditSharedTemplateLevel(level)
+  validateBodyBlockStructure(level, issues)
+
+  const scenarios = selection ? [selection] : bodySelectionScenarios(level)
+  scenarios.forEach((scenario, scenarioIndex) => {
+    let resolved: ResolvedProgrammingLevel
+    try {
+      resolved = resolvedLevelFor(level, scenario)
+    } catch (error) {
+      issues.push(issue(
+        'RESOLUTION_INVALID',
+        'scenario[' + scenarioIndex + ']',
+        error instanceof Error ? error.message : 'Programming selection could not be resolved.',
+      ))
+      return
+    }
+
+    const workingSets = calculateWorkingSetEstimate(resolved)
+    if (workingSets.min < 12 || workingSets.max > 16) {
+      issues.push(issue(
+        'WORKING_SET_RANGE',
+        'scenario[' + scenarioIndex + '].blocks',
+        'BODY total working sets must remain within 12–16 for every resolved scenario.',
+      ))
+    }
+
+    if (resolved.exercises.filter((exercise) => exercise.laterality === 'unilateral').length > 1) {
+      issues.push(issue(
+        'BODY_UNILATERAL_COUNT',
+        'scenario[' + scenarioIndex + '].exercises',
+        'BODY should contain no more than one unilateral training exercise per resolved scenario.',
+      ))
+    }
+
+    const fixedExerciseCount = resolved.exercises.filter((exercise) => exercise.optional !== true).length
+    const totalExerciseCount = resolved.exercises.length
+    if (fixedExerciseCount < 4 || fixedExerciseCount > 5 || totalExerciseCount > 6) {
+      issues.push(issue(
+        'BODY_EXERCISE_COUNT',
+        'scenario[' + scenarioIndex + '].exercises',
+        'BODY defaults must contain 4–5 exercises and optional additions may not exceed 6.',
+      ))
+    }
+
+    const estimate = estimateSessionMinutes(resolved)
+    if (estimate.totalMinutes.max > 60) {
+      issues.push(issue('TIME_OVER_BUDGET', 'scenario[' + scenarioIndex + '].estimatedMinutes', 'Calculated BODY session maximum exceeds 60 minutes.'))
+    }
+    if (scenario.includeComplementaryOption !== true) {
+      const manualMax = level.estimatedMinutes.max
+      const calculatedMax = estimate.totalMinutes.max
+      if (!Number.isFinite(manualMax)
+        || manualMax < calculatedMax
+        || manualMax - calculatedMax > 10) {
+        issues.push(issue('ESTIMATE_MISMATCH', 'estimatedMinutes.max', 'Manual maximum must cover every default calculated scenario maximum and stay within a 10-minute gap.'))
+      }
+    }
+  })
+
+  return issues
+}
+
+const validateBodyTemplateSetShape = (
+  templates: readonly ProgrammingTemplate[],
+  issues: AuditIssue[],
+): void => {
+  const expectedIds = ['body1', 'body2', 'body3', 'body4', 'body5']
+  if (templates.length !== expectedIds.length
+    || templates.map((template) => template.id).join('|') !== expectedIds.join('|')) {
+    issues.push(issue('TEMPLATE_SET', 'templates', 'The BODY Programming source must contain exactly body1 through body5.'))
+  }
+  const seen = new Set<string>()
+  templates.forEach((template, templateIndex) => {
+    if (seen.has(template.id)) {
+      issues.push(issue('TEMPLATE_SET', 'templates[' + templateIndex + '].id', 'Template IDs must be unique.'))
+    }
+    seen.add(template.id)
+    const levels = Object.keys(template.levels)
+    if (levels.length !== 4 || !['l1', 'l2', 'l3', 'l4'].every((programLevel) => levels.includes(programLevel))) {
+      issues.push(issue('LEVEL_SET', 'templates[' + templateIndex + '].levels', 'Every BODY template must contain L1 through L4.'))
+    }
+  })
+}
+
+export const auditBodyTemplateSet = (
+  templates: readonly ProgrammingTemplate[],
+): AuditIssue[] => {
+  const issues: AuditIssue[] = []
+  validateBodyTemplateSetShape(templates, issues)
+  for (const template of templates) {
+    const levels = (['l1', 'l2', 'l3', 'l4'] as const).map((programLevel) => template.levels[programLevel])
+    levels.forEach((level) => {
+      if (!level) {
+        issues.push(issue('LEVEL_SET', template.id, 'Template level is missing.'))
+        return
+      }
+      auditBodyTemplateLevel(level).forEach((levelIssue) => {
+        issues.push({
+          ...levelIssue,
+          path: template.id + '/' + level.programLevel + '/' + levelIssue.path,
+        })
+      })
+
+      if (template.id === 'body5') {
+        let defaultCount: number | null = null
+        try {
+          defaultCount = resolveProgrammingLevel(level).exercises.length
+        } catch {
+          defaultCount = null
+        }
+        if (defaultCount !== 5) {
+          issues.push(issue(
+            'BODY05_EXERCISE_COUNT',
+            template.id + '/' + level.programLevel + '/exercises',
+            'BODY05 must resolve to exactly five default exercises.',
+          ))
+        }
+
+        const scenarioCounts = bodySelectionScenarios(level).map((scenario) => {
+          try {
+            return resolveProgrammingLevel(level, scenario).exercises.length
+          } catch {
+            return null
+          }
+        })
+        const maximumCount = scenarioCounts.every((count): count is number => count !== null)
+          ? Math.max(...scenarioCounts)
+          : null
+        if (maximumCount !== 6) {
+          issues.push(issue(
+            'BODY05_EXERCISE_COUNT',
+            template.id + '/' + level.programLevel + '/exercises',
+            'BODY05 must resolve to no more than six exercises, with a six-exercise complementary maximum.',
+          ))
+        }
+      }
+    })
+    for (let index = 1; index < levels.length; index += 1) {
+      if (levels[index - 1] && levels[index] && !hasProgression(levels[index - 1], levels[index])) {
+        issues.push(issue('PROGRESSION_MISSING', template.id + '/l' + (index + 1), 'Each adjacent BODY level needs a load, volume, rest, range or control progression.'))
+      }
+    }
+  }
+  return issues
+}
+
+export const auditProgrammingTemplateSet = (
+  templates: readonly ProgrammingTemplate[],
+): AuditIssue[] => {
+  const issues: AuditIssue[] = []
+  const threeC = templates.filter((template) => template.system === '3c')
+  const body = templates.filter((template) => template.system === 'body')
+  if (threeC.length > 0) issues.push(...audit3CTemplateSet(threeC))
+  if (body.length > 0) issues.push(...auditBodyTemplateSet(body))
+  if (templates.some((template) => template.system !== '3c' && template.system !== 'body')) {
+    issues.push(issue('SYSTEM_INVALID', 'templates', 'Programming templates must use a supported system.'))
+  }
+  return issues
+}
+
+const workRange = (
+  prescription: ExercisePrescription,
+  laterality?: Laterality,
+  sideRestSeconds?: Count,
+): WorkRange => {
   const base = prescription.durationSeconds !== undefined
     ? toRange(prescription.durationSeconds)
     : prescription.distanceMeters !== undefined
@@ -620,10 +1081,10 @@ const workRange = (prescription: ExercisePrescription, laterality?: Laterality):
 
   return {
     base: multiplyRange(base, 2),
-    unilateralAdjustment: {
-      min: DEFAULT_UNILATERAL_RESET_SECONDS,
-      max: DEFAULT_UNILATERAL_RESET_SECONDS,
-    },
+    unilateralAdjustment: addRange(
+      { min: DEFAULT_UNILATERAL_RESET_SECONDS, max: DEFAULT_UNILATERAL_RESET_SECONDS },
+      toRange(sideRestSeconds),
+    ),
   }
 }
 
@@ -638,9 +1099,9 @@ const blockBufferRange = (count: number): NumericRange => ({
 })
 
 /**
- * Conservative private-coaching planning window floors for the fixed 3C levels.
- * This overhead is separate from equipment setup and never replaces the
- * measurable-work validation performed by auditTemplateLevel.
+ * Conservative private-coaching planning window floors for every supported
+ * Programming level. This overhead is separate from equipment setup and never
+ * replaces measurable-work validation.
  */
 const MINIMUM_PLANNING_WINDOW_SECONDS: Record<ProgramLevel, number> = {
   l1: 34 * 60,
@@ -649,17 +1110,42 @@ const MINIMUM_PLANNING_WINDOW_SECONDS: Record<ProgramLevel, number> = {
   l4: 44 * 60,
 }
 
-const minimumPlanningWindowSeconds = (level: ProgrammingTemplateLevel): number => (
-  MINIMUM_PLANNING_WINDOW_SECONDS[level.programLevel]
-  + level.blocks
+/**
+ * Additional coaching-window allowance for a full, strength-only BODY
+ * session. The measurable work estimator intentionally remains structural;
+ * this supplement represents conservative setup, instruction, demonstration,
+ * and coaching time that is not encoded on individual prescriptions.
+ */
+const STRENGTH_ONLY_PLANNING_SUPPLEMENT_SECONDS: Record<ProgramLevel, number> = {
+  l1: 10 * 60,
+  l2: 9 * 60,
+  l3: 6 * 60,
+  l4: 6 * 60,
+}
+
+export const calculatePlanningFloorSeconds = (
+  level: ResolvableProgrammingLevel,
+  selection?: ProgrammingSelection,
+): number => {
+  const resolved = resolvedLevelFor(level, selection)
+  const strengthOnlySupplement = resolved.blocks.length === 1
+    && resolved.blocks[0]?.kind === 'strength'
+    && getTrainingExercises(resolved.blocks[0]).length >= 5
+    ? STRENGTH_ONLY_PLANNING_SUPPLEMENT_SECONDS[resolved.programLevel]
+    : 0
+  const circuitSupplement = resolved.blocks
     .filter((block) => block.kind === 'circuit')
-    .reduce((total, block) => total + block.exercises.length * 2 * 60, 0)
-)
+    .reduce((total, block) => total + getTrainingExercises(block).length * 2 * 60, 0)
+
+  return MINIMUM_PLANNING_WINDOW_SECONDS[resolved.programLevel]
+    + strengthOnlySupplement
+    + circuitSupplement
+}
 
 const exerciseSets = (exercise: TrainingExercise): NumericRange => toRange(exercise.prescription.sets, 1)
 
 const estimatePrep = (level: ProgrammingTemplateLevel) => {
-  const work = level.prep.map((item) => workRange(item.prescription, item.laterality))
+  const work = level.prep.map((item) => workRange(item.prescription, item.laterality, item.sideRestSeconds))
   const baseWork = sumRanges(work.map((item) => item.base))
   const unilateralAdjustment = sumRanges(work.map((item) => item.unilateralAdjustment))
   const setup = itemSetupRange(level.prep.length)
@@ -676,18 +1162,15 @@ const estimatePrep = (level: ProgrammingTemplateLevel) => {
 
 const estimateRampUp = (level: ProgrammingTemplateLevel) => {
   const ranges = level.rampUp.map((set) => {
-    const reps = multiplyRange(toRange(set.reps), DEFAULT_SECONDS_PER_REP)
-    const work = set.laterality === 'unilateral' ? multiplyRange(reps, 2) : reps
+    const work = workRange({ reps: set.reps }, set.laterality, set.sideRestSeconds)
     const rest = toRange(set.restSeconds)
-    return addRange(addRange(work, rest), itemSetupRange(1))
+    return addRange(addRange(work.base, rest), itemSetupRange(1))
   })
 
   return {
     base: sumRanges(ranges),
     unilateralAdjustment: sumRanges(level.rampUp.map((set) => (
-      set.laterality === 'unilateral'
-        ? { min: DEFAULT_UNILATERAL_RESET_SECONDS, max: DEFAULT_UNILATERAL_RESET_SECONDS }
-        : { min: 0, max: 0 }
+      workRange({ reps: set.reps }, set.laterality, set.sideRestSeconds).unilateralAdjustment
     ))),
   }
 }
@@ -696,10 +1179,11 @@ const estimateStrength = (block: TrainingBlock) => {
   const execution: NumericRange[] = []
   const rest: NumericRange[] = []
   const unilateralAdjustment: NumericRange[] = []
+  const exercises = getTrainingExercises(block)
 
-  for (const exercise of block.exercises) {
+  for (const exercise of exercises) {
     const sets = exerciseSets(exercise)
-    const work = workRange(exercise.prescription, exercise.laterality)
+    const work = workRange(exercise.prescription, exercise.laterality, exercise.sideRestSeconds)
     execution.push(multiplyRange(work.base, sets))
     unilateralAdjustment.push(multiplyRange(work.unilateralAdjustment, sets))
 
@@ -717,16 +1201,21 @@ const estimateStrength = (block: TrainingBlock) => {
     execution: sumRanges(execution),
     rest: sumRanges(rest),
     unilateralAdjustment: sumRanges(unilateralAdjustment),
+    transitions: {
+      min: Math.max(0, exercises.length - 1) * DEFAULT_STRENGTH_TRANSITION_SECONDS,
+      max: Math.max(0, exercises.length - 1) * DEFAULT_STRENGTH_TRANSITION_SECONDS,
+    },
   }
 }
 
 const estimateCircuit = (block: TrainingBlock) => {
   const rounds = toRange(block.rounds, 1)
-  const work = block.exercises.map((exercise) => workRange(exercise.prescription, exercise.laterality))
+  const exercises = getTrainingExercises(block)
+  const work = exercises.map((exercise) => workRange(exercise.prescription, exercise.laterality, exercise.sideRestSeconds))
   const basePerRound = sumRanges(work.map((item) => item.base))
   const unilateralPerRound = sumRanges(work.map((item) => item.unilateralAdjustment))
   const transitionSeconds = toRange(block.transitionSeconds, DEFAULT_STATION_TRANSITION_SECONDS)
-  const stationCount = Math.max(0, block.exercises.length - 1)
+  const stationCount = Math.max(0, exercises.length - 1)
   const stationTransitions = multiplyRange(
     transitionSeconds,
     {
@@ -749,19 +1238,24 @@ const estimateCircuit = (block: TrainingBlock) => {
 }
 
 export const estimateSessionMinutes = (
-  level: ProgrammingTemplateLevel,
+  level: ResolvableProgrammingLevel,
+  selection?: ProgrammingSelection,
 ): SessionTimeEstimate => {
-  const prep = estimatePrep(level)
-  const rampUp = estimateRampUp(level)
-  const strengthBlocks = level.blocks.filter((block) => block.kind === 'strength')
-  const circuitBlocks = level.blocks.filter((block) => block.kind === 'circuit')
+  const resolved = resolvedLevelFor(level, selection)
+  const prep = estimatePrep(resolved)
+  const rampUp = estimateRampUp(resolved)
+  const strengthBlocks = resolved.blocks.filter((block) => block.kind === 'strength')
+  const circuitBlocks = resolved.blocks.filter((block) => block.kind === 'circuit')
   const strength = strengthBlocks.map(estimateStrength)
   const circuit = circuitBlocks.map(estimateCircuit)
 
   const strengthExecution = sumRanges(strength.map((item) => item.execution))
   const strengthRest = sumRanges(strength.map((item) => item.rest))
   const circuitWork = sumRanges(circuit.map((item) => item.work))
-  const transitions = sumRanges(circuit.map((item) => item.stationTransitions))
+  const transitions = sumRanges([
+    ...strength.map((item) => item.transitions),
+    ...circuit.map((item) => item.stationTransitions),
+  ])
   const roundRest = sumRanges(circuit.map((item) => item.roundRest))
   const unilateralAdjustment = sumRanges([
     prep.unilateralAdjustment,
@@ -770,8 +1264,8 @@ export const estimateSessionMinutes = (
     ...circuit.map((item) => item.unilateralAdjustment),
   ])
   const baseEquipmentBuffer = addRange(
-    blockBufferRange(level.blocks.length),
-    itemSetupRange(level.blocks.reduce((count, block) => count + block.exercises.length, 0)),
+    blockBufferRange(resolved.blocks.length),
+    itemSetupRange(resolved.blocks.reduce((count, block) => count + block.exercises.length, 0)),
   )
 
   const totalBeforeEquipmentBuffer = sumRanges([
@@ -788,7 +1282,7 @@ export const estimateSessionMinutes = (
   const totalWithEquipmentBuffer = addRange(totalBeforeEquipmentBuffer, equipmentBuffer)
   const planningOverheadSupplement = Math.max(
     0,
-    minimumPlanningWindowSeconds(level) - totalWithEquipmentBuffer.max,
+    calculatePlanningFloorSeconds(resolved) - totalWithEquipmentBuffer.max,
   )
   const planningOverhead = {
     min: planningOverheadSupplement,

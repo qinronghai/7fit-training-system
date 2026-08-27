@@ -4,10 +4,12 @@ import type {
   ExercisePrescription,
   Laterality,
   ProgramLevel,
+  SelectableExerciseSlot,
   TrainingExercise,
   ProgrammingTemplateLevel,
   TrainingBlock,
 } from '../src/data/programming/types'
+import { getTrainingExercises } from '../src/data/programming/types'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
 import {
   auditTemplateLevel,
@@ -69,7 +71,7 @@ describe('3C Programming V1 source shape', () => {
     const keys = threeCTemplates.flatMap((template) => Object.values(template.levels).flatMap((level) => [
       ...level.prep.map((item) => item.exerciseKey),
       ...level.rampUp.map((item) => item.exerciseKey),
-      ...level.blocks.flatMap((block) => block.exercises.flatMap((item) => [
+      ...level.blocks.flatMap((block) => getTrainingExercises(block).flatMap((item) => [
         item.exerciseKey,
         ...(item.alternatives ?? []).map((alternative) => alternative.exerciseKey),
       ])),
@@ -248,12 +250,29 @@ const getLevel = (templateId: string, programLevel: ProgramLevel): ProgrammingTe
 
 const validLevel = getLevel('3c1', 'l3')
 
+const selectableSlotFor3C: SelectableExerciseSlot = {
+  kind: 'selectable',
+  id: '3c-fixture-slot',
+  required: true,
+  selectCount: 1,
+  defaultOptionKey: '3c-fixture-option',
+  options: [{
+    exerciseKey: '3c-fixture-option',
+    displayName: '3C Fixture Option',
+    role: 'ACCESSORY',
+    movementPattern: 'core',
+    laterality: 'bilateral',
+    fatigueRisk: 'low',
+    prescription: { reps: 5 },
+  }],
+}
+
 const withoutPrimary = (source: ProgrammingTemplateLevel): ProgrammingTemplateLevel => ({
   ...source,
   blocks: source.blocks.map((block, blockIndex) => blockIndex === 0
     ? {
       ...block,
-      exercises: block.exercises.map((item, index) => index === 0
+      exercises: getTrainingExercises(block).map((item, index) => index === 0
         ? { ...item, role: 'SECONDARY' as const }
         : item),
     }
@@ -270,7 +289,7 @@ const withCircuitSets = (source: ProgrammingTemplateLevel): ProgrammingTemplateL
   blocks: source.blocks.map((block) => block.kind === 'circuit'
     ? {
       ...block,
-      exercises: block.exercises.map((item) => ({
+      exercises: getTrainingExercises(block).map((item) => ({
         ...item,
         prescription: { ...item.prescription, sets: 2 },
       })),
@@ -283,7 +302,7 @@ const withoutStrengthSets = (source: ProgrammingTemplateLevel): ProgrammingTempl
   blocks: source.blocks.map((block, blockIndex) => blockIndex === 0
     ? {
       ...block,
-      exercises: block.exercises.map((item, index) => index === 0
+      exercises: getTrainingExercises(block).map((item, index) => index === 0
         ? { ...item, prescription: { ...item.prescription, sets: undefined } }
         : item),
     }
@@ -295,7 +314,7 @@ const withHighRiskL3CircuitAction = (source: ProgrammingTemplateLevel): Programm
   blocks: source.blocks.map((block, blockIndex) => blockIndex === 1 && block.kind === 'circuit'
     ? {
       ...block,
-      exercises: block.exercises.map((item) => ({ ...item, fatigueRisk: 'high' as const })),
+      exercises: getTrainingExercises(block).map((item) => ({ ...item, fatigueRisk: 'high' as const })),
     }
     : block),
 })
@@ -305,7 +324,7 @@ const withHighRiskL1CircuitAction = (source: ProgrammingTemplateLevel): Programm
   blocks: source.blocks.map((block) => block.kind === 'circuit'
     ? {
       ...block,
-      exercises: block.exercises.map((item) => ({ ...item, fatigueRisk: 'high' as const })),
+      exercises: getTrainingExercises(block).map((item) => ({ ...item, fatigueRisk: 'high' as const })),
     }
     : block),
 })
@@ -331,6 +350,7 @@ const mutateExercise = (
     .levels[programLevel]
     .blocks[blockIndex]
     .exercises
+    .filter((item): item is TrainingExercise => 'exerciseKey' in item)
     .find((item) => item.exerciseKey === exerciseKey)!
   mutate(exercise)
   return copy
@@ -367,8 +387,8 @@ describe('3C Programming V1 audit rules', () => {
 
   it('rejects high-risk actions only in the second L3 Circuit Block', () => {
     const mutated = withHighRiskL3CircuitAction(validLevel)
-    expect(mutated.blocks[0].exercises.map((item) => item.fatigueRisk)).toEqual(
-      validLevel.blocks[0].exercises.map((item) => item.fatigueRisk),
+    expect(getTrainingExercises(mutated.blocks[0]).map((item) => item.fatigueRisk)).toEqual(
+      getTrainingExercises(validLevel.blocks[0]).map((item) => item.fatigueRisk),
     )
     expect(auditTemplateLevel(mutated)).toContainEqual(
       expect.objectContaining({ code: 'HIGH_RISK_IN_CIRCUIT' }),
@@ -381,10 +401,36 @@ describe('3C Programming V1 audit rules', () => {
     )
   })
 
+  it('keeps Pattern Prep strict for the Phase 1 3C audit', () => {
+    const source = getLevel('3c1', 'l1')
+    const withoutPatternPrep = {
+      ...source,
+      prep: source.prep.filter((item) => item.phase !== 'P'),
+    }
+
+    expect(auditTemplateLevel(withoutPatternPrep)).toContainEqual(
+      expect.objectContaining({ code: 'PATTERN_PREP_REQUIRED' }),
+    )
+  })
+
+  it('rejects a selectable slot in the 3C-specific audit instead of filtering it out', () => {
+    const source = getLevel('3c1', 'l3')
+    const mutated = {
+      ...source,
+      blocks: source.blocks.map((block, blockIndex) => blockIndex === 1
+        ? { ...block, exercises: [selectableSlotFor3C, ...block.exercises] }
+        : block),
+    }
+
+    expect(auditTemplateLevel(mutated)).toContainEqual(
+      expect.objectContaining({ code: 'SELECTABLE_SLOT_FORBIDDEN' }),
+    )
+  })
+
   it('enforces the three frozen special cases', () => {
-    expect(getLevel('3c3', 'l1').blocks[0].exercises.map((item) => item.exerciseKey)).not.toContain('low-box-step')
-    expect(getLevel('3c3', 'l4').blocks[1].exercises.every((item) => item.prescription.sets === undefined)).toBe(true)
-    expect(getLevel('3c6', 'l4').blocks.flatMap((block) => block.exercises).some((item) => /barbell|杠铃/i.test(item.displayName))).toBe(false)
+    expect(getTrainingExercises(getLevel('3c3', 'l1').blocks[0]).map((item) => item.exerciseKey)).not.toContain('low-box-step')
+    expect(getTrainingExercises(getLevel('3c3', 'l4').blocks[1]).every((item) => item.prescription.sets === undefined)).toBe(true)
+    expect(getLevel('3c6', 'l4').blocks.flatMap(getTrainingExercises).some((item) => /barbell|杠铃/i.test(item.displayName))).toBe(false)
   })
 
   it('rejects a 3C03 L1 Farmer Carry laterality mutation', () => {
