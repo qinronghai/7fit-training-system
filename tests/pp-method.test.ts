@@ -142,6 +142,55 @@ describe('PP-E3 method type contract', () => {
     expect(ppMethodNodeById.get('pp23')?.readinessProfile).toBe('anti-extension-core')
     expect(ppMethodNodeById.get('pp24')?.readinessProfile).toBe('anti-extension-core')
     expect(ppMethodNodeById.get('pp26')?.readinessProfile).toBe('anti-extension-core')
+
+    const expectedAssignments: Record<string, readonly string[]> = {
+      'breath-rib-pelvis-foundation': [
+        'pp17', 'pp20', 'pp21', 'pp22',
+        'exp-supine-90-90-breathing', 'exp-side-lying-breathing',
+      ],
+      'hinge-control': [
+        'pp02', 'pp03', 'exp-wall-touch-hinge', 'exp-dowel-three-point-hinge',
+      ],
+      'squat-control': [
+        'pp01', 'exp-assisted-sit-to-stand', 'exp-box-squat',
+      ],
+      'hip-rotation-control': [
+        'pp04', 'pp05', 'exp-supported-90-90', 'exp-static-90-90',
+      ],
+      'hip-extension-control': [
+        'pp10', 'exp-glute-bridge-march', 'exp-single-leg-glute-bridge',
+      ],
+      'frontal-plane-weight-shift': [
+        'pp08', 'pp09', 'exp-long-lever-side-lying-adduction',
+        'exp-standing-lateral-weight-shift', 'exp-basic-hip-abduction',
+      ],
+      'anterior-support': ['pp16', 'exp-incline-plank'],
+      'dynamic-support': [
+        'pp11', 'pp14', 'pp15', 'exp-quadruped-single-limb-lift',
+        'exp-incline-support-weight-shift', 'exp-plank-march',
+        'exp-short-forward-step-high-plank',
+      ],
+      'lateral-support': [
+        'pp18', 'pp19', 'exp-knee-side-plank', 'exp-standard-side-plank',
+        'exp-side-plank-reach', 'exp-partial-side-plank-rotation',
+        'exp-short-lever-copenhagen', 'exp-full-copenhagen',
+      ],
+      'anti-extension-core': ['pp23', 'pp24', 'pp26'],
+      'rotation-integration': ['pp12', 'pp13', 'pp25', 'exp-open-book'],
+      locomotion: [
+        'pp06', 'pp07', 'exp-standing-march', 'exp-half-squat-low-locomotion',
+      ],
+    }
+    const expectedIds = Object.values(expectedAssignments).flat()
+    expect(expectedIds).toHaveLength(53)
+    expect(new Set(expectedIds)).toHaveLength(53)
+    for (const [profileId, expectedIdsForProfile] of Object.entries(expectedAssignments)) {
+      const actualIdsForProfile = ppMethodNodes
+        .filter((node) => node.readinessProfile === profileId)
+        .map((node) => node.id)
+        .sort()
+      expect(actualIdsForProfile).toEqual([...expectedIdsForProfile].sort())
+    }
   })
 
   it('keeps the PP verification ledger empty after the three resolved mappings', () => {
