@@ -165,6 +165,129 @@ export const ppMethodReadinessProfiles:
     ),
   }
 
+type TargetedReadinessOverride = Pick<PPMethodNode, 'qualityGate' | 'commonCompensations'>
+
+const targetedReadinessOverrides: Readonly<Partial<Record<PPMethodNodeId, TargetedReadinessOverride>>> = {
+  pp03: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在负重整合动作中保持连续呼吸。' },
+      { code: 'RIB_PELVIS', domain: 'position', requirement: '保持肋骨—骨盆堆叠与躯干位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '以负重髋铰链控制完成动作。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调髋铰链、支撑、力量传递与头顶推举整合。' },
+      { code: 'TOLERANCE', domain: 'tolerance', requirement: '在可耐受范围内完成负重整合。' },
+    ),
+    commonCompensations: ['推举时以腰椎代偿。', '失去髋铰链或肋骨—骨盆堆叠。'],
+  },
+  pp05: {
+    qualityGate: criteria(
+      { code: 'POSITION', domain: 'position', requirement: '保持 90/90 髋位与骨盆位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '控制髋旋转桥接而不借惯性。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调髋旋转、骨盆控制与顶髋。' },
+      { code: 'HIP_EXTENSION', domain: 'control', requirement: '从受控髋旋转过渡到明确的髋伸展。' },
+      { code: 'TOLERANCE', domain: 'tolerance', requirement: '在可耐受范围内保持桥接质量。' },
+    ),
+    commonCompensations: ['腰椎代偿髋伸展。', '骨盆旋转并失去髋控制。'],
+  },
+  pp11: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在对侧肢体分离时保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持四足支撑中的肋骨—骨盆位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '在对侧负荷变化时保持支撑。' },
+      { code: 'CONTRALATERAL', domain: 'coordination', requirement: '控制对侧肢体分离与回收。' },
+    ),
+    commonCompensations: ['对侧肢体分离时支撑塌陷。', '屏气或骨盆旋转。'],
+  },
+  pp13: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在高位支撑转体中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持高位支撑与骨盆位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '在跨步转体中保持抗旋控制。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调高位平板、动态转体与力量传递。' },
+      { code: 'TOLERANCE', domain: 'tolerance', requirement: '在可耐受范围内完成动态整合。' },
+    ),
+    commonCompensations: ['力量传递中肩带或骨盆失控。', '以腰椎主导旋转。'],
+  },
+  pp15: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在交叉膝撞中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持支撑中的肋骨—骨盆位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '维持抗伸展与重心转移控制。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调交叉膝撞与支撑侧稳定。' },
+      { code: 'HIP_FLEXION', domain: 'control', requirement: '在支撑下完成受控髋屈曲，不牺牲躯干位置。' },
+    ),
+    commonCompensations: ['髋屈曲时腰椎过伸。', '交叉膝撞时支撑塌陷或重心失控。'],
+  },
+  pp16: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在前侧支撑停留中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '在前侧支撑中保持肋骨—骨盆堆叠。' },
+      { code: 'CONTROL', domain: 'control', requirement: '保持肩带与躯干控制。' },
+      { code: 'DURATION', domain: 'duration', requirement: '在规定支撑持续时间内保持动作质量。' },
+    ),
+    commonCompensations: ['持续支撑时肋骨外翻。', '腰椎过伸或肩胛塌陷。'],
+  },
+  pp18: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在侧向支撑转体中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持肩带、躯干与骨盆侧向位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '在侧向支撑中抵抗塌陷。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调旋转与力量传递而不牺牲侧向支撑。' },
+      { code: 'TOLERANCE', domain: 'tolerance', requirement: '在可耐受范围内完成侧向整合。' },
+    ),
+    commonCompensations: ['旋转时躯干下塌。', '力量传递中耸肩或骨盆下坠。'],
+  },
+  pp19: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在侧支撑顶髋中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持骨盆与肩带的侧向位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '控制髋外展与骨盆抬升。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调侧向支撑、髋外展与骨盆控制。' },
+      { code: 'DURATION', domain: 'duration', requirement: '在规定重复或停留内保持侧向控制。' },
+    ),
+    commonCompensations: ['髋外展时骨盆下坠。', '侧向支撑中躯干下塌。'],
+  },
+  pp23: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在单腿交替伸展中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持肋骨—骨盆位置。' },
+      { code: 'CONTROL', domain: 'control', requirement: '抵抗腰椎伸展并保持核心控制。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调单侧交替与对侧肢体整合。' },
+      { code: 'TOLERANCE', domain: 'tolerance', requirement: '在可耐受范围内保持交替动作质量。' },
+    ),
+    commonCompensations: ['对侧肢体伸展时肋骨外翻。', '呼吸丢失或腰椎过伸。'],
+  },
+  pp24: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在双腿伸展的高负荷阶段保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持肋骨—骨盆堆叠。' },
+      { code: 'CONTROL', domain: 'control', requirement: '在最高双侧伸展需求下保持抗伸展控制。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调双侧肢体同时伸展与躯干稳定。' },
+      { code: 'DURATION', domain: 'duration', requirement: '在规定重复内保持双侧伸展质量。' },
+    ),
+    commonCompensations: ['双侧伸展时腰椎过伸。', '高负荷阶段屏气或肋骨外翻。'],
+  },
+  pp25: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在交叉旋转中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '保持肋骨—骨盆位置并区分躯干与骨盆。' },
+      { code: 'CONTROL', domain: 'control', requirement: '在旋转范围内保持抗伸展控制。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调对侧旋转与核心力量传递。' },
+      { code: 'TOLERANCE', domain: 'tolerance', requirement: '在可耐受范围内完成旋转整合。' },
+    ),
+    commonCompensations: ['腰椎主导旋转。', '失去骨盆与躯干分离控制。'],
+  },
+  pp26: {
+    qualityGate: criteria(
+      { code: 'BREATH', domain: 'breathing', requirement: '在死虫式重复中保持呼吸。' },
+      { code: 'POSITION', domain: 'position', requirement: '重复动作时保持肋骨—骨盆堆叠。' },
+      { code: 'CONTROL', domain: 'control', requirement: '抵抗伸展并保持核心基础控制。' },
+      { code: 'COORDINATION', domain: 'coordination', requirement: '协调四肢动作而不改变躯干位置。' },
+      { code: 'REPETITION', domain: 'repetition', requirement: '在重复中保持可再现的肋骨—骨盆位置。' },
+    ),
+    commonCompensations: ['重复时肋骨外翻。', '骨盆位置丢失或呼吸变浅。'],
+  },
+}
+
 const mapping = {
   mapped: (exerciseId: string): PPCanonicalMapping => ({ status: 'mapped', exerciseId }),
   variant: (exerciseId: string, variantId: string): PPCanonicalMapping => ({ status: 'variant', exerciseId, variantId }),
@@ -193,12 +316,13 @@ type NodeOptions = {
 
 const node = (options: NodeOptions): PPMethodNode => {
   const profile = ppMethodReadinessProfiles[options.readinessProfile]
+  const targetedOverride = targetedReadinessOverrides[options.id]
   return {
     ...options,
     readinessProfile: options.readinessProfile,
     breathing: options.breathing ?? continuousBreathing,
-    qualityGate: options.qualityGate ?? profile.qualityGate,
-    commonCompensations: options.commonCompensations ?? profile.commonCompensations,
+    qualityGate: options.qualityGate ?? targetedOverride?.qualityGate ?? profile.qualityGate,
+    commonCompensations: options.commonCompensations ?? targetedOverride?.commonCompensations ?? profile.commonCompensations,
   }
 }
 
@@ -224,17 +348,17 @@ export const ppMethodNodes: readonly PPMethodNode[] = [
   node({ readinessProfile: 'rotation-integration', id: 'pp13', source: source('PP13', '高位支撑前跨步转体'), kind: 'variant', mapping: mapping.variant('high-plank-step-through', 'pp13-high-plank-step-through-rotation'), primaryPathway: 'integration', secondaryPathways: ['support', 'locomotion', 'thoracic-rotation'], progressionLevel: 'P3', role: 'integration', capabilities: ['shoulder-support', 'anti-rotation', 'rotation', 'locomotion', 'force-transfer'] }),
   node({ readinessProfile: 'dynamic-support', id: 'pp14', source: source('PP14', '高位平板前跨步'), kind: 'exercise', mapping: mapping.mapped('high-plank-step-through'), primaryPathway: 'support', secondaryPathways: ['locomotion'], progressionLevel: 'P3', role: 'bridge', capabilities: ['shoulder-support', 'anti-extension', 'weight-shift', 'locomotion'] }),
   node({ readinessProfile: 'dynamic-support', id: 'pp15', source: source('PP15', '支撑膝撞'), kind: 'exercise', mapping: mapping.mapped('cross-body-plank-knee-drive'), primaryPathway: 'support', progressionLevel: 'P3', role: 'bridge', capabilities: ['shoulder-support', 'anti-extension', 'weight-shift'] }),
-  node({ readinessProfile: 'anterior-support', id: 'pp16', source: source('PP16', '平板支撑'), kind: 'exercise', mapping: mapping.mapped('plank'), primaryPathway: 'support', secondaryPathways: ['core'], progressionLevel: 'P2', role: 'base', capabilities: ['shoulder-support', 'anti-extension', 'rib-pelvis-control'] }),
+  node({ readinessProfile: 'anterior-support', id: 'pp16', breathing: phaseCuedBreathing, source: source('PP16', '平板支撑'), kind: 'exercise', mapping: mapping.mapped('plank'), primaryPathway: 'support', secondaryPathways: ['core'], progressionLevel: 'P2', role: 'base', capabilities: ['shoulder-support', 'anti-extension', 'rib-pelvis-control'] }),
   node({ readinessProfile: 'breath-rib-pelvis-foundation', id: 'pp17', source: source('PP17', '平板位主动收腹 / 骨盆后倾'), kind: 'drill', mapping: mapping.methodOnly(), hostExerciseId: 'plank', primaryPathway: 'support', progressionLevel: 'P1', role: 'drill', capabilities: ['rib-pelvis-control', 'pelvic-control', 'breathing-control'], breathing: resetBreathing, coachNotes: ['该节点是依附于 plank 执行的控制 Drill，不是独立 exercise variant。'] }),
-  node({ readinessProfile: 'lateral-support', id: 'pp18', source: source('PP18', '侧支撑转体'), kind: 'variant', mapping: mapping.variant('side-plank', 'pp18-side-plank-rotation'), primaryPathway: 'lateral-support', secondaryPathways: ['thoracic-rotation'], progressionLevel: 'P4', role: 'integration', capabilities: ['anti-lateral-flexion', 'shoulder-support', 'rotation', 'force-transfer'] }),
-  node({ readinessProfile: 'lateral-support', id: 'pp19', source: source('PP19', '侧支撑顶髋'), kind: 'variant', mapping: mapping.variant('side-plank', 'pp19-side-plank-hip-lift'), primaryPathway: 'lateral-support', secondaryPathways: ['frontal-plane'], progressionLevel: 'P3', role: 'bridge', capabilities: ['anti-lateral-flexion', 'shoulder-support', 'hip-abduction', 'pelvic-control'] }),
+  node({ readinessProfile: 'lateral-support', id: 'pp18', breathing: phaseCuedBreathing, source: source('PP18', '侧支撑转体'), kind: 'variant', mapping: mapping.variant('side-plank', 'pp18-side-plank-rotation'), primaryPathway: 'lateral-support', secondaryPathways: ['thoracic-rotation'], progressionLevel: 'P4', role: 'integration', capabilities: ['anti-lateral-flexion', 'shoulder-support', 'rotation', 'force-transfer'] }),
+  node({ readinessProfile: 'lateral-support', id: 'pp19', breathing: phaseCuedBreathing, source: source('PP19', '侧支撑顶髋'), kind: 'variant', mapping: mapping.variant('side-plank', 'pp19-side-plank-hip-lift'), primaryPathway: 'lateral-support', secondaryPathways: ['frontal-plane'], progressionLevel: 'P3', role: 'bridge', capabilities: ['anti-lateral-flexion', 'shoulder-support', 'hip-abduction', 'pelvic-control'] }),
   node({ readinessProfile: 'breath-rib-pelvis-foundation', id: 'pp20', source: source('PP20', '四足支撑'), kind: 'drill', mapping: mapping.methodOnly(), primaryPathway: 'support', progressionLevel: 'P0', role: 'foundation', capabilities: ['shoulder-support', 'rib-pelvis-control', 'breathing-control'], breathing: resetBreathing }),
   node({ readinessProfile: 'breath-rib-pelvis-foundation', id: 'pp21', source: source('PP21', '站立 360° 呼吸控制'), kind: 'breathing', mapping: mapping.methodOnly(), primaryPathway: 'breath', secondaryPathways: ['core'], progressionLevel: 'P0', role: 'foundation', capabilities: ['breathing-control', 'rib-pelvis-control'], breathing: resetBreathing }),
   node({ readinessProfile: 'breath-rib-pelvis-foundation', id: 'pp22', source: source('PP22', '腹横肌呼吸—肢体联动串联'), kind: 'breathing', mapping: mapping.methodOnly(), primaryPathway: 'breath', secondaryPathways: ['core', 'integration'], progressionLevel: 'P1', role: 'bridge', capabilities: ['breathing-control', 'rib-pelvis-control', 'force-transfer'], breathing: phaseCuedBreathing }),
-  node({ readinessProfile: 'anti-extension-core', id: 'pp23', source: source('PP23', '普拉提单腿伸展'), kind: 'exercise', mapping: mapping.mapped('pilates-single-leg-stretch'), primaryPathway: 'core', progressionLevel: 'P3', role: 'integration', capabilities: ['anti-extension', 'breathing-control', 'contralateral-control'] }),
-  node({ readinessProfile: 'anti-extension-core', id: 'pp24', source: source('PP24', '普拉提双腿伸展'), kind: 'exercise', mapping: mapping.mapped('pilates-double-leg-stretch'), primaryPathway: 'core', progressionLevel: 'P4', role: 'integration', capabilities: ['anti-extension', 'breathing-control', 'force-transfer'] }),
-  node({ readinessProfile: 'rotation-integration', id: 'pp25', source: source('PP25', '普拉提十字交叉'), kind: 'exercise', mapping: mapping.mapped('pilates-criss-cross'), primaryPathway: 'core', secondaryPathways: ['thoracic-rotation'], progressionLevel: 'P4', role: 'integration', capabilities: ['anti-extension', 'rotation', 'breathing-control'] }),
-  node({ readinessProfile: 'anti-extension-core', id: 'pp26', source: source('PP26', '死虫式'), kind: 'exercise', mapping: mapping.mapped('dead-bug'), primaryPathway: 'core', progressionLevel: 'P2', role: 'base', capabilities: ['anti-extension', 'rib-pelvis-control', 'contralateral-control', 'breathing-control'] }),
+  node({ readinessProfile: 'anti-extension-core', id: 'pp23', breathing: phaseCuedBreathing, source: source('PP23', '普拉提单腿伸展'), kind: 'exercise', mapping: mapping.mapped('pilates-single-leg-stretch'), primaryPathway: 'core', progressionLevel: 'P3', role: 'integration', capabilities: ['anti-extension', 'breathing-control', 'contralateral-control'] }),
+  node({ readinessProfile: 'anti-extension-core', id: 'pp24', breathing: phaseCuedBreathing, source: source('PP24', '普拉提双腿伸展'), kind: 'exercise', mapping: mapping.mapped('pilates-double-leg-stretch'), primaryPathway: 'core', progressionLevel: 'P4', role: 'integration', capabilities: ['anti-extension', 'breathing-control', 'force-transfer'] }),
+  node({ readinessProfile: 'rotation-integration', id: 'pp25', breathing: phaseCuedBreathing, source: source('PP25', '普拉提十字交叉'), kind: 'exercise', mapping: mapping.mapped('pilates-criss-cross'), primaryPathway: 'core', secondaryPathways: ['thoracic-rotation'], progressionLevel: 'P4', role: 'integration', capabilities: ['anti-extension', 'rotation', 'breathing-control'] }),
+  node({ readinessProfile: 'anti-extension-core', id: 'pp26', breathing: phaseCuedBreathing, source: source('PP26', '死虫式'), kind: 'exercise', mapping: mapping.mapped('dead-bug'), primaryPathway: 'core', progressionLevel: 'P2', role: 'base', capabilities: ['anti-extension', 'rib-pelvis-control', 'contralateral-control', 'breathing-control'] }),
 
   node({ readinessProfile: 'breath-rib-pelvis-foundation', id: 'exp-supine-90-90-breathing', kind: 'breathing', mapping: mapping.methodOnly(), primaryPathway: 'breath', secondaryPathways: ['hip-rotation'], progressionLevel: 'P0', role: 'foundation', capabilities: ['breathing-control', 'rib-pelvis-control'], breathing: resetBreathing }),
   node({ readinessProfile: 'breath-rib-pelvis-foundation', id: 'exp-side-lying-breathing', kind: 'breathing', mapping: mapping.methodOnly(), primaryPathway: 'breath', secondaryPathways: ['lateral-support'], progressionLevel: 'P0', role: 'foundation', capabilities: ['breathing-control', 'rib-pelvis-control'], breathing: resetBreathing }),

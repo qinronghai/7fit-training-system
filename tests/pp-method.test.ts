@@ -193,6 +193,49 @@ describe('PP-E3 method type contract', () => {
     }
   })
 
+  it('gives exactly the 12 targeted nodes distinct semantic readiness overrides', () => {
+    const targetedExpectations: Record<string, RegExp> = {
+      pp03: /overhead|推举/i,
+      pp05: /hip-extension|髋伸展/i,
+      pp11: /contralateral|对侧/i,
+      pp13: /force-transfer|力量传递/i,
+      pp15: /hip-flexion|髋屈曲/i,
+      pp16: /duration|rib|pelvis|持续|肋骨|骨盆/i,
+      pp18: /rotation|force-transfer|旋转|力量传递/i,
+      pp19: /abduction|pelvis|外展|骨盆/i,
+      pp23: /contralateral|breath|对侧|呼吸/i,
+      pp24: /bilateral|extension|双侧|伸展/i,
+      pp25: /rotation|lumbar|旋转|腰椎/i,
+      pp26: /rib|pelvis|repeat|肋骨|骨盆|重复/i,
+    }
+
+    expect(Object.keys(targetedExpectations)).toHaveLength(12)
+    for (const [id, marker] of Object.entries(targetedExpectations)) {
+      const methodNode = ppMethodNodeById.get(id)
+      const profile = ppMethodReadinessProfiles[methodNode!.readinessProfile]
+      const nodeText = [
+        ...methodNode!.qualityGate.criteria.map((item) => `${item.code} ${item.requirement}`),
+        ...methodNode!.commonCompensations,
+      ].join(' ')
+      const profileText = [
+        ...profile.qualityGate.criteria.map((item) => `${item.code} ${item.requirement}`),
+        ...profile.commonCompensations,
+      ].join(' ')
+
+      expect(nodeText).toMatch(marker)
+      expect(nodeText).not.toBe(profileText)
+    }
+
+    const pp03Codes = ppMethodNodeById.get('pp03')!.qualityGate.criteria.map((item) => item.code)
+    expect(pp03Codes).toEqual(expect.arrayContaining(['BREATH', 'CONTROL', 'COORDINATION', 'TOLERANCE']))
+    const pp16 = ppMethodNodeById.get('pp16')!
+    expect(pp16.qualityGate.criteria.map((item) => item.code))
+      .toEqual(expect.arrayContaining(['POSITION', 'DURATION']))
+    expect(pp16.qualityGate.criteria.some((item) =>
+      item.domain === 'position' && /rib|pelvis|肋骨|骨盆/i.test(item.requirement),
+    )).toBe(true)
+  })
+
   it('keeps the PP verification ledger empty after the three resolved mappings', () => {
     expect(ppMethodNodeById.get('pp03')?.mapping).toEqual({
       status: 'mapped',
