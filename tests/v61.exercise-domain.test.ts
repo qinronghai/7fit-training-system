@@ -78,6 +78,9 @@ describe('V6.1 exercise domain', () => {
   it('resolves aliases to the same canonical exercise', () => {
     expect(resolveExerciseId('臀桥')).toBe('glute-bridge')
     expect(resolveExerciseId('徒手臀桥')).toBe('glute-bridge')
+    expect(resolveExerciseId('低位鸭步')).toBe('duck-walk')
+    expect(resolveExerciseId('Side Plank')).toBe('side-plank')
+    expect(resolveExerciseId('Pilates Criss-Cross')).toBe('pilates-criss-cross')
   })
 
   it('keeps load descriptors out of canonical kettlebell halo identity', () => {
@@ -91,7 +94,32 @@ describe('V6.1 exercise domain', () => {
   })
 
   it('assigns every canonical Exercise an explicit display taxonomy category', () => {
-    expect(exercises).toHaveLength(92)
+    const resolvedCanonicalExpectations = [
+      ['duck-walk', '低位鸭步', 'Duck Walk', 'lower'],
+      ['side-lying-hip-adduction', '侧卧髋内收', 'Side-Lying Hip Adduction', 'lower'],
+      ['high-plank-step-through', '高位平板前跨步', 'High Plank Step-Through', 'core'],
+      ['side-plank', '侧平板支撑', 'Side Plank', 'core'],
+      ['pilates-single-leg-stretch', '普拉提单腿伸展', 'Pilates Single-Leg Stretch', 'core'],
+      ['pilates-double-leg-stretch', '普拉提双腿伸展', 'Pilates Double-Leg Stretch', 'core'],
+      ['pilates-criss-cross', '普拉提十字交叉', 'Pilates Criss-Cross', 'core'],
+      ['single-leg-glute-bridge', '单腿臀桥', 'Single-Leg Glute Bridge', 'glute'],
+      ['standing-march', '站立抬膝', 'Standing March', 'lower'],
+    ] as const
+
+    expect(exercises).toHaveLength(101)
+    for (const [id, name, englishName, displayCategoryId] of resolvedCanonicalExpectations) {
+      const exercise = exercises.find((candidate) => candidate.id === id)
+      expect(exercise).toMatchObject({
+        id,
+        name,
+        englishName,
+        displayCategoryId,
+        aliases: [],
+      })
+      expect(exercise?.patternIds.length).toBeGreaterThan(0)
+      expect(exercise?.equipment.length).toBeGreaterThan(0)
+      expect(exercise?.techniqueLevel).toMatch(/^tl[0-4]$/)
+    }
     for (const exercise of exercises) {
       expect(exercise.displayCategoryId).toBeDefined()
       expect(exerciseDisplayCategoryLabels[exercise.displayCategoryId]).toBeTruthy()
@@ -113,6 +141,8 @@ describe('V6.1 Programming exercise mapping contract', () => {
 
     expect(keys.size).toBe(176)
     expect(new Set([...keys].filter((key) => key.startsWith('action-')))).toEqual(new Set())
+    expect(programmingExerciseMappings).toHaveLength(176)
+    expect(programmingExerciseUsages).toHaveLength(832)
   })
 
   it('has one explicit mapping entry for every formal Programming key', () => {
@@ -145,7 +175,7 @@ describe('V6.1 Programming exercise mapping contract', () => {
     const canonicalIds = new Set(exercises.map((exercise) => exercise.id))
 
     expect(lookup.size).toBe(176)
-    expect(new Set(lookup.values())).toEqual(canonicalIds)
+    expect(new Set(lookup.values()).size).toBe(101)
     for (const canonicalId of lookup.values()) expect(canonicalIds.has(canonicalId)).toBe(true)
   })
 
