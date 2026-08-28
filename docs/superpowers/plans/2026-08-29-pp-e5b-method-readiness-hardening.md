@@ -66,7 +66,7 @@ The profiles are:
 | dynamic-support | breathing, position, control, coordination | pp11, pp14, pp15, exp-quadruped-single-limb-lift, exp-incline-support-weight-shift, exp-plank-march, exp-short-forward-step-high-plank |
 | lateral-support | breathing, position, control, coordination, duration | pp18, pp19, exp-knee-side-plank, exp-standard-side-plank, exp-side-plank-reach, exp-partial-side-plank-rotation, exp-short-lever-copenhagen, exp-full-copenhagen |
 | anti-extension-core | breathing, position, control, coordination, duration | pp23, pp24, pp26 |
-| rotation-integration | breathing, position, control, coordination, tolerance | pp03, pp12, pp13, pp25, exp-open-book |
+| rotation-integration | breathing, position, control, coordination, tolerance | pp12, pp13, pp25, exp-open-book |
 | locomotion | breathing, position, control, coordination, tolerance | pp06, pp07, exp-standing-march, exp-half-squat-low-locomotion |
 
 The assignment above covers all 53 nodes exactly once. It is intentionally not a one-profile-per-pathway symmetry rule; it follows the current node semantics.
@@ -125,7 +125,7 @@ Keep PP03 as an intentional advanced root:
 - no new PP Method prerequisite schema;
 - retain integration/P4/hinge+support metadata;
 - add a precise coachNote stating that general loaded overhead-press capacity is an external training prerequisite not represented by the PP Method graph;
-- use the rotation-integration profile with a targeted quality gate for breathing, trunk/pelvis position, coordination and tolerance.
+- use the hinge-control profile with a targeted quality gate for breathing, trunk/rib-pelvis position, loaded-hinge control, force-transfer coordination and tolerance; the targeted gate also carries the overhead-press integration requirement without creating a new profile.
 
 This resolves the accidental-looking semantics without pretending that PP Method owns general strength progression.
 
@@ -341,6 +341,16 @@ expect(ppProgressionEdges).toEqual(expect.arrayContaining([
     capabilityDelta: ['hip-extension'],
   }),
 ]))
+const pp05Edges = ppProgressionEdges.filter(edge =>
+  edge.from === 'pp05' || edge.to === 'pp05',
+)
+expect(pp05Edges).toHaveLength(1)
+expect(pp05Edges[0]).toMatchObject({
+  from: 'pp04',
+  to: 'pp05',
+  type: 'progression',
+  capabilityDelta: ['hip-extension'],
+})
 expect(ppMethodNodeById.get('pp04')?.progressionLevel).toBe('P1')
 expect(ppMethodNodeById.get('pp05')?.progressionLevel).toBe('P2')
 expect(ppProgressionEdges).toHaveLength(45)
@@ -354,9 +364,9 @@ Do not add a graph edge for PP03.
 
 Add a targeted PP03 gate and coachNote using existing fields:
 
-- profile: rotation-integration;
+- profile: hinge-control;
 - criteria domains: breathing, position, control, coordination, tolerance;
-- semantic codes include BREATH, POSITION, CONTROL, COORDINATION and TOLERANCE;
+- semantic codes include BREATH, RIB_PELVIS, POSITION, CONTROL, COORDINATION and TOLERANCE;
 - coachNote explicitly states that general loaded overhead-press capacity is an external training prerequisite not modeled by PP Method Graph.
 
 Tests must verify:
@@ -373,6 +383,7 @@ expect(pp03?.coachNotes?.some(note =>
 expect(ppProgressionEdges.some(edge =>
   edge.from === 'pp02' && edge.to === 'pp03',
 )).toBe(false)
+expect(ppProgressionEdges.filter(edge => edge.to === 'pp03')).toEqual([])
 ~~~
 
 If coachNotes plus qualityGate cannot make the external prerequisite clear without a new schema field, stop for review; do not invent a prerequisite schema in E5B.
@@ -455,6 +466,25 @@ The final validator invariants are:
 - every capabilityDelta entry is in the declared PPCapability taxonomy;
 - every edge has a non-empty reason;
 - no strict subset requirement.
+
+### 11.4 Non-empty edge reason
+
+`validatePPProgressionGraph` must reject blank or whitespace-only `reason` values and report the offending edge deterministically. The RED fixture uses an otherwise valid declared capability:
+
+~~~ts
+const blankReasonErrors = validatePPProgressionGraph(ppMethodNodes, [
+  {
+    from: 'pp20',
+    to: 'pp21',
+    type: 'progression',
+    capabilityDelta: ['force-transfer'],
+    reason: '   ',
+  },
+])
+expect(blankReasonErrors).toContain('progression edge reason is empty: pp20 -> pp21')
+~~~
+
+The GREEN implementation must validate `reason.trim().length > 0` and include the exact `${from} -> ${to}` pair in the error.
 
 ## 12. 44-Edge Reconciliation Matrix
 
@@ -601,7 +631,7 @@ it('assigns every node to one of the 12 reusable readiness profiles', () => {
 it('gives critical nodes profile-specific semantic gates and compensations', () => {
   const criticalIds = [
     'pp03', 'pp05', 'pp11', 'pp13', 'pp15',
-    'pp18', 'pp19', 'pp23', 'pp24', 'pp25', 'pp26',
+    'pp16', 'pp18', 'pp19', 'pp23', 'pp24', 'pp25', 'pp26',
   ]
   for (const id of criticalIds) {
     const methodNode = ppMethodNodeById.get(id)
@@ -610,8 +640,48 @@ it('gives critical nodes profile-specific semantic gates and compensations', () 
   }
   expect(ppMethodNodeById.get('pp03')?.qualityGate.criteria.map(item => item.code))
     .toEqual(expect.arrayContaining(['COORDINATION', 'TOLERANCE']))
+  expect(ppMethodNodeById.get('pp16')?.qualityGate.criteria.map(item => item.code))
+    .toEqual(expect.arrayContaining(['POSITION', 'DURATION']))
+  expect(ppMethodNodeById.get('pp16')?.qualityGate.criteria.some(item =>
+    item.domain === 'position' && /rib|pelvis/i.test(item.requirement),
+  )).toBe(true)
 })
 ~~~
+
+The test must make targeted provenance visible without adding a production `override` flag. Define a test-only expectation table for all 12 targeted IDs, asserting a node-specific semantic code/requirement marker and that the resulting criteria or compensation value is not equal to the corresponding reusable profile default:
+
+~~~ts
+const targetedExpectations = {
+  pp03: /overhead|推举/i,
+  pp05: /hip-extension|髋伸展/i,
+  pp11: /contralateral|对侧/i,
+  pp13: /force-transfer|力量传递/i,
+  pp15: /hip-flexion|髋屈曲/i,
+  pp16: /duration|rib|pelvis|持续|肋骨|骨盆/i,
+  pp18: /rotation|force-transfer|旋转|力量传递/i,
+  pp19: /abduction|pelvis|外展|骨盆/i,
+  pp23: /contralateral|breath|对侧|呼吸/i,
+  pp24: /bilateral|extension|双侧|伸展/i,
+  pp25: /rotation|lumbar|旋转|腰椎/i,
+  pp26: /rib|pelvis|repeat|肋骨|骨盆|重复/i,
+} as const
+for (const [id, marker] of Object.entries(targetedExpectations)) {
+  const methodNode = ppMethodNodeById.get(id)
+  const profile = ppMethodReadinessProfiles[methodNode!.readinessProfile]
+  const nodeText = [
+    ...methodNode!.qualityGate.criteria.map(item => `${item.code} ${item.requirement}`),
+    ...methodNode!.commonCompensations,
+  ].join(' ')
+  const profileText = [
+    ...profile.qualityGate.criteria.map(item => `${item.code} ${item.requirement}`),
+    ...profile.commonCompensations,
+  ].join(' ')
+  expect(nodeText).toMatch(marker)
+  expect(nodeText).not.toBe(profileText)
+}
+~~~
+
+This table is test-visible evidence for all 12 overrides, including PP16 duration/rib-pelvis semantics; it must not be satisfied by merely inheriting the profile defaults.
 
 ### Breathing modes
 
@@ -643,6 +713,17 @@ it('connects PP05 without fabricating a PP03 prerequisite edge', () => {
   expect(ppProgressionEdges.some(edge =>
     edge.from === 'pp02' && edge.to === 'pp03',
   )).toBe(false)
+  expect(ppProgressionEdges.filter(edge => edge.to === 'pp03')).toEqual([])
+  const pp05Edges = ppProgressionEdges.filter(edge =>
+    edge.from === 'pp05' || edge.to === 'pp05',
+  )
+  expect(pp05Edges).toHaveLength(1)
+  expect(pp05Edges[0]).toMatchObject({
+    from: 'pp04',
+    to: 'pp05',
+    type: 'progression',
+    capabilityDelta: ['hip-extension'],
+  })
   expect(ppMethodNodeById.get('pp03')?.coachNotes?.some(note =>
     note.includes('外部') && note.includes('推举'),
   )).toBe(true)
@@ -714,19 +795,19 @@ Expected failure: PPMethodNode has no readinessProfile/profile registry and crit
 
 ### Task 2 RED
 
-Add targeted breathing and critical override assertions. Run the same focused command.
+Add targeted quality/compensation assertions for PP03, PP05, PP11, PP13, PP15, PP16, PP18, PP19, PP23, PP24, PP25 and PP26, plus the seven targeted breathing assertions. Run the same focused command.
 
 Expected failure: the new phase-cued modes and profile-specific criterion/compensation semantics are absent.
 
 ### Task 3 RED
 
-Add PP05, PP03 and pp06 edge tests.
+Add PP05, PP03 and pp06 edge tests. Task 3 owns the PP03 external-general-strength coachNote, the all-incoming-edge assertion for PP03, the PP04→PP05 edge, and the pp06 branch assertion; it does not own the PP03 targeted gate.
 
 Expected failure: pp04→pp05 is absent, pp06 edge is still progression, and PP03 has no explicit external-prerequisite coachNote.
 
 ### Task 4 RED
 
-Add capability type and runtime validator tests. Run:
+Add capability type, runtime validator and blank/whitespace edge-reason tests. The blank-reason fixture must fail before implementation. Run:
 
 ~~~bash
 npm test -- --run tests/pp-method.test.ts
@@ -779,6 +860,7 @@ Steps:
 - [ ] Write targeted critical-node and breathing-mode tests.
 - [ ] Run the focused PP test and observe failure for missing overrides.
 - [ ] Add exactly 12 targeted quality/compensation overrides listed in Section 2.2.
+- [ ] Keep the PP03 targeted qualityGate/commonCompensations override in this task; it must not be deferred to Task 3.
 - [ ] Add the seven phase-cued breathing strategy overrides listed in Section 2.3.
 - [ ] Keep ordinary mobility/simple locomotion on continuous default.
 - [ ] Verify PP06, PP17 and PP20 remain drill kind and PP21/PP22 remain breathing kind.
@@ -791,7 +873,7 @@ Steps:
 Files:
 
 - Modify src/data/pp/progressionGraph.ts.
-- Modify src/data/pp/methodNodes.ts for PP03 coachNote/profile override.
+- Modify src/data/pp/methodNodes.ts for the PP03 coachNote only.
 - Test tests/pp-method.test.ts.
 
 Steps:
@@ -800,7 +882,8 @@ Steps:
 - [ ] Run the focused PP test and observe the expected graph failures.
 - [ ] Add exactly pp04→pp05 with capabilityDelta hip-extension.
 - [ ] Change only pp06→exp-standing-lateral-weight-shift from progression to branch.
-- [ ] Add the PP03 external general-strength prerequisite coachNote and targeted gate.
+- [ ] Add the PP03 external general-strength prerequisite coachNote only; do not add or mutate the PP03 targeted qualityGate/commonCompensations override here.
+- [ ] Add the PP03 zero-incoming-edge assertion, the exact PP04→PP05 edge, and the pp06 branch assertion.
 - [ ] Do not add PP02→PP03 or any shoulder progression edge.
 - [ ] Run the focused PP test and verify the graph count is 45.
 - [ ] Run npm run build.
@@ -818,12 +901,13 @@ Files:
 
 Steps:
 
-- [ ] Write the declared hip-flexion and runtime unknown-delta tests, including the type-level negative fixture.
+- [ ] Write the declared hip-flexion, runtime unknown-delta, and blank/whitespace edge-reason tests, including the type-level negative fixture.
 - [ ] Run the focused test and npm run build to observe the expected failure.
 - [ ] Add hip-flexion to PPCapability and the runtime capability list.
 - [ ] Change capabilityDelta to readonly PPCapability[].
 - [ ] Add hip-flexion to exp-plank-march, exp-short-forward-step-high-plank, pp13, pp14 and pp15.
 - [ ] Add runtime validation for every capabilityDelta entry.
+- [ ] Add deterministic validation that rejects blank/whitespace edge reasons and reports `${from} -> ${to}`.
 - [ ] Reconcile all 44 existing edges using the matrix in Section 12.
 - [ ] Preserve valid repeated/increased-demand deltas and do not impose subset validation.
 - [ ] Verify the new PP05 edge is included as edge 45.
