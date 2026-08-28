@@ -18,6 +18,31 @@ export {
   ppProgressionEdges,
   validatePPProgressionGraph,
 } from './progressionGraph'
+export {
+  ppFemaleChallengeRoles,
+  ppFemaleDemandScores,
+  ppFemaleDemands,
+  ppFemaleEligibilities,
+  ppFemaleEligibilityCounts,
+  ppFemaleProgrammingPolicy,
+  ppFemaleSlots,
+} from './femaleProgrammingPolicy'
+export type {
+  PPFemaleBlockSelection,
+  PPFemaleChallengeRole,
+  PPFemaleDemand,
+  PPFemaleEligibility,
+  PPFemalePolicyEntry,
+  PPFemaleProgrammingContext,
+  PPFemaleSlot,
+  PPFemaleValidationIssue,
+  PPFemaleValidationIssueCode,
+} from './femaleProgrammingPolicy'
+export {
+  getFemaleProgrammingCandidates,
+  validateFemaleProgrammingBlock,
+  validateFemaleProgrammingPolicy,
+} from './femaleProgrammingRules'
 
 export const canonicalExerciseIds: ReadonlySet<string> = new Set(
   exercises.map((exercise) => exercise.id),
