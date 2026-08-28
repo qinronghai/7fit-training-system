@@ -106,7 +106,8 @@ describe('V6.1 exercise domain', () => {
       ['standing-march', '站立抬膝', 'Standing March', 'lower'],
     ] as const
 
-    expect(exercises).toHaveLength(101)
+    expect(exercises).toHaveLength(104)
+    expect(new Set(exercises.map((exercise) => exercise.id)).size).toBe(104)
     for (const [id, name, englishName, displayCategoryId] of resolvedCanonicalExpectations) {
       const exercise = exercises.find((candidate) => candidate.id === id)
       expect(exercise).toMatchObject({
@@ -116,6 +117,8 @@ describe('V6.1 exercise domain', () => {
         displayCategoryId,
         aliases: [],
       })
+      expect(resolveExerciseId(name)).toBe(id)
+      expect(resolveExerciseId(englishName)).toBe(id)
       expect(exercise?.patternIds.length).toBeGreaterThan(0)
       expect(exercise?.equipment.length).toBeGreaterThan(0)
       expect(exercise?.techniqueLevel).toMatch(/^tl[0-4]$/)
@@ -123,6 +126,34 @@ describe('V6.1 exercise domain', () => {
     for (const exercise of exercises) {
       expect(exercise.displayCategoryId).toBeDefined()
       expect(exerciseDisplayCategoryLabels[exercise.displayCategoryId]).toBeTruthy()
+    }
+  })
+
+  it('adds the three frozen E4C canonical exercises with stable names and metadata', () => {
+    const frozenE4CExercises = [
+      ['deadlift-to-overhead-press', '硬拉推肩', 'Deadlift to Overhead Press', 'shoulder', ['hinge', 'vpush'], ['杠铃', '哑铃', '壶铃']],
+      ['shin-box-hip-lift', '胫骨箱顶髋', 'Shin Box Hip Lift', 'mobility', ['hip', 'rotation'], ['自重']],
+      ['cross-body-plank-knee-drive', '高位平板对侧提膝', 'Cross-Body Plank Knee Drive', 'core', ['core', 'rotation'], ['自重']],
+    ] as const
+
+    expect(exercises).toHaveLength(104)
+    expect(new Set(exercises.map((exercise) => exercise.id)).size).toBe(104)
+
+    for (const [id, name, englishName, displayCategoryId, patternIds, equipment] of frozenE4CExercises) {
+      const exercise = getExercise(id)
+
+      expect(exercise).toMatchObject({
+        id,
+        name,
+        englishName,
+        displayCategoryId,
+        aliases: [],
+      })
+      expect(exercise?.patternIds).toEqual(expect.arrayContaining([...patternIds]))
+      expect(exercise?.equipment).toEqual(expect.arrayContaining([...equipment]))
+      expect(exercise?.techniqueLevel).toMatch(/^tl[0-4]$/)
+      expect(resolveExerciseId(name)).toBe(id)
+      expect(resolveExerciseId(englishName)).toBe(id)
     }
   })
 
