@@ -115,6 +115,7 @@ describe('V6.1 exercise domain', () => {
         name,
         englishName,
         displayCategoryId,
+        aliases: [],
       })
       expect(resolveExerciseId(name)).toBe(id)
       expect(resolveExerciseId(englishName)).toBe(id)
@@ -130,15 +131,15 @@ describe('V6.1 exercise domain', () => {
 
   it('adds the three frozen E4C canonical exercises with stable names and metadata', () => {
     const frozenE4CExercises = [
-      ['deadlift-to-overhead-press', '硬拉推肩', 'Deadlift to Overhead Press', 'shoulder', ['hinge', 'vpush']],
-      ['shin-box-hip-lift', '胫骨箱顶髋', 'Shin Box Hip Lift', 'mobility', ['hip', 'rotation']],
-      ['cross-body-plank-knee-drive', '高位平板对侧提膝', 'Cross-Body Plank Knee Drive', 'core', ['core', 'rotation']],
+      ['deadlift-to-overhead-press', '硬拉推肩', 'Deadlift to Overhead Press', 'shoulder', ['hinge', 'vpush'], ['杠铃', '哑铃', '壶铃']],
+      ['shin-box-hip-lift', '胫骨箱顶髋', 'Shin Box Hip Lift', 'mobility', ['hip', 'rotation'], ['自重']],
+      ['cross-body-plank-knee-drive', '高位平板对侧提膝', 'Cross-Body Plank Knee Drive', 'core', ['core', 'rotation'], ['自重']],
     ] as const
 
     expect(exercises).toHaveLength(104)
     expect(new Set(exercises.map((exercise) => exercise.id)).size).toBe(104)
 
-    for (const [id, name, englishName, displayCategoryId, patternIds] of frozenE4CExercises) {
+    for (const [id, name, englishName, displayCategoryId, patternIds, equipment] of frozenE4CExercises) {
       const exercise = getExercise(id)
 
       expect(exercise).toMatchObject({
@@ -146,8 +147,11 @@ describe('V6.1 exercise domain', () => {
         name,
         englishName,
         displayCategoryId,
-        patternIds,
+        aliases: [],
       })
+      expect(exercise?.patternIds).toEqual(expect.arrayContaining(patternIds))
+      expect(exercise?.equipment).toEqual(expect.arrayContaining(equipment))
+      expect(exercise?.techniqueLevel).toMatch(/^tl[0-4]$/)
       expect(resolveExerciseId(name)).toBe(id)
       expect(resolveExerciseId(englishName)).toBe(id)
     }
