@@ -320,6 +320,51 @@ describe('PP-E3 method type contract', () => {
     ]))
   })
 
+  it('resolves PP05 connectivity, PP03 root semantics and the pp06 branch', () => {
+    const pp05Edges = ppProgressionEdges.filter((edge) =>
+      edge.from === 'pp05' || edge.to === 'pp05',
+    )
+    expect(pp05Edges).toHaveLength(1)
+    expect(pp05Edges[0]).toMatchObject({
+      from: 'pp04',
+      to: 'pp05',
+      type: 'progression',
+      capabilityDelta: ['hip-extension'],
+    })
+    expect(ppMethodNodeById.get('pp04')).toMatchObject({
+      progressionLevel: 'P1',
+      capabilities: expect.arrayContaining(['hip-rotation', 'pelvic-control']),
+    })
+    expect(ppMethodNodeById.get('pp05')).toMatchObject({
+      progressionLevel: 'P2',
+      capabilities: expect.arrayContaining(['hip-rotation', 'hip-extension', 'pelvic-control']),
+    })
+    expect(ppProgressionEdges).toHaveLength(45)
+
+    const pp03 = ppMethodNodeById.get('pp03')!
+    expect(pp03).toMatchObject({
+      progressionLevel: 'P4',
+      role: 'integration',
+      primaryPathway: 'integration',
+      secondaryPathways: ['hinge', 'support'],
+      readinessProfile: 'hinge-control',
+    })
+    expect(ppProgressionEdges.filter((edge) => edge.to === 'pp03')).toEqual([])
+    expect(ppProgressionEdges.some((edge) => edge.from === 'pp02' && edge.to === 'pp03')).toBe(false)
+    expect(pp03.coachNotes?.some((note) => note.includes('外部') && note.includes('推举'))).toBe(true)
+
+    const pp06Edge = ppProgressionEdges.find((edge) =>
+      edge.from === 'pp06' && edge.to === 'exp-standing-lateral-weight-shift',
+    )
+    expect(pp06Edge).toMatchObject({
+      type: 'branch',
+      capabilityDelta: ['weight-shift', 'locomotion'],
+    })
+    expect(pp06Edge?.reason).toContain('分支')
+    expect(ppMethodNodeById.get('pp06')?.progressionLevel).toBe('P1')
+    expect(ppMethodNodeById.get('exp-standing-lateral-weight-shift')?.progressionLevel).toBe('P0')
+  })
+
   it('materializes the approved progression map across every pathway', () => {
     const requiredEdges = [
       ['pp21', 'exp-supine-90-90-breathing'],

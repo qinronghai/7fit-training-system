@@ -149,6 +149,13 @@ export const ppProgressionEdges: readonly PPProgressionEdge[] = [
     reason: '从静态位置进入受控髋转换。',
   },
   {
+    from: 'pp04',
+    to: 'pp05',
+    type: 'progression',
+    capabilityDelta: ['hip-extension'],
+    reason: '在受控 90/90 髋转换后进入胫骨箱顶髋，增加髋伸展要求并保持骨盆控制。',
+  },
+  {
     from: 'exp-knee-side-plank',
     to: 'exp-standard-side-plank',
     type: 'progression',
@@ -270,9 +277,9 @@ export const ppProgressionEdges: readonly PPProgressionEdge[] = [
   {
     from: 'pp06',
     to: 'exp-standing-lateral-weight-shift',
-    type: 'progression',
+    type: 'branch',
     capabilityDelta: ['weight-shift', 'locomotion'],
-    reason: '从坐姿骨盆髋走逐步转为站立重心转移。',
+    reason: '从坐姿骨盆髋走分支到站立重心转移基础，而非声明 P-Level 严格进阶。',
   },
   {
     from: 'exp-standing-lateral-weight-shift',
