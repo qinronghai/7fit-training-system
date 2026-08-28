@@ -149,8 +149,8 @@ describe('V6.1 exercise domain', () => {
         displayCategoryId,
         aliases: [],
       })
-      expect(exercise?.patternIds).toEqual(expect.arrayContaining(patternIds))
-      expect(exercise?.equipment).toEqual(expect.arrayContaining(equipment))
+      expect(exercise?.patternIds).toEqual(expect.arrayContaining([...patternIds]))
+      expect(exercise?.equipment).toEqual(expect.arrayContaining([...equipment]))
       expect(exercise?.techniqueLevel).toMatch(/^tl[0-4]$/)
       expect(resolveExerciseId(name)).toBe(id)
       expect(resolveExerciseId(englishName)).toBe(id)
