@@ -210,6 +210,7 @@ describe('PP-E3 method type contract', () => {
     }
 
     expect(Object.keys(targetedExpectations)).toHaveLength(12)
+    const targetedIds = new Set(Object.keys(targetedExpectations))
     for (const [id, marker] of Object.entries(targetedExpectations)) {
       const methodNode = ppMethodNodeById.get(id)
       const profile = ppMethodReadinessProfiles[methodNode!.readinessProfile]
@@ -226,6 +227,13 @@ describe('PP-E3 method type contract', () => {
       expect(nodeText).not.toBe(profileText)
     }
 
+    for (const methodNode of ppMethodNodes) {
+      if (targetedIds.has(methodNode.id)) continue
+      const profile = ppMethodReadinessProfiles[methodNode.readinessProfile]
+      expect(methodNode.qualityGate).toEqual(profile.qualityGate)
+      expect(methodNode.commonCompensations).toEqual(profile.commonCompensations)
+    }
+
     const pp03Codes = ppMethodNodeById.get('pp03')!.qualityGate.criteria.map((item) => item.code)
     expect(pp03Codes).toEqual(expect.arrayContaining(['BREATH', 'CONTROL', 'COORDINATION', 'TOLERANCE']))
     const pp16 = ppMethodNodeById.get('pp16')!
@@ -234,6 +242,33 @@ describe('PP-E3 method type contract', () => {
     expect(pp16.qualityGate.criteria.some((item) =>
       item.domain === 'position' && /rib|pelvis|肋骨|骨盆/i.test(item.requirement),
     )).toBe(true)
+  })
+
+  it('keeps the exact cross-cutting breathing mode contract', () => {
+    const idsByBreathingMode = (mode: 'continuous' | 'phase-cued' | 'reset') =>
+      ppMethodNodes
+        .filter((node) => node.breathing.mode === mode)
+        .map((node) => node.id)
+        .sort()
+
+    expect(idsByBreathingMode('phase-cued')).toEqual([
+      'pp03', 'pp10', 'pp16', 'pp18', 'pp19',
+      'pp22', 'pp23', 'pp24', 'pp25', 'pp26',
+    ])
+    expect(idsByBreathingMode('reset')).toEqual([
+      'exp-side-lying-breathing',
+      'exp-standing-lateral-weight-shift',
+      'exp-supine-90-90-breathing',
+      'pp06', 'pp17', 'pp20', 'pp21',
+    ])
+    expect(idsByBreathingMode('continuous')).toHaveLength(36)
+    expect(idsByBreathingMode('phase-cued')).toHaveLength(10)
+    expect(idsByBreathingMode('reset')).toHaveLength(7)
+    expect(ppMethodNodeById.get('pp06')?.kind).toBe('drill')
+    expect(ppMethodNodeById.get('pp17')?.kind).toBe('drill')
+    expect(ppMethodNodeById.get('pp20')?.kind).toBe('drill')
+    expect(ppMethodNodeById.get('pp21')?.kind).toBe('breathing')
+    expect(ppMethodNodeById.get('pp22')?.kind).toBe('breathing')
   })
 
   it('keeps the PP verification ledger empty after the three resolved mappings', () => {
