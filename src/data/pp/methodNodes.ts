@@ -87,9 +87,9 @@ const source = (sourceId: string, sourceName: string): PPMethodNode['source'] =>
 export const ppMethodNodes: readonly PPMethodNode[] = [
   node({ id: 'pp01', source: source('PP01', '髋主导蹲'), kind: 'variant', mapping: mapping.variant('squat', 'pp01-hip-dominant-squat'), primaryPathway: 'squat', progressionLevel: 'P1', role: 'foundation', capabilities: ['hip-hinge', 'pelvic-control', 'rib-pelvis-control'] }),
   node({ id: 'pp02', source: source('PP02', '髋铰链拉'), kind: 'variant', mapping: mapping.variant('hinge-drill', 'pp02-hip-hinge-pull'), primaryPathway: 'hinge', progressionLevel: 'P1', role: 'foundation', capabilities: ['hip-hinge', 'hip-extension', 'rib-pelvis-control'] }),
-  node({ id: 'pp03', source: source('PP03', '硬拉推肩'), kind: 'exercise', mapping: mapping.add('deadlift-to-overhead-press'), primaryPathway: 'integration', secondaryPathways: ['hinge', 'support'], progressionLevel: 'P4', role: 'integration', capabilities: ['hip-hinge', 'hip-extension', 'force-transfer', 'shoulder-support'], breathing: phaseCuedBreathing }),
+  node({ id: 'pp03', source: source('PP03', '硬拉推肩'), kind: 'exercise', mapping: mapping.mapped('deadlift-to-overhead-press'), primaryPathway: 'integration', secondaryPathways: ['hinge', 'support'], progressionLevel: 'P4', role: 'integration', capabilities: ['hip-hinge', 'hip-extension', 'force-transfer', 'shoulder-support'], breathing: phaseCuedBreathing }),
   node({ id: 'pp04', source: source('PP04', '90/90 髋转换'), kind: 'variant', mapping: mapping.variant('90-90-hip-rotation', 'pp04-90-90-hip-switch'), primaryPathway: 'hip-rotation', progressionLevel: 'P1', role: 'foundation', capabilities: ['hip-rotation', 'pelvic-control'] }),
-  node({ id: 'pp05', source: source('PP05', '90/90 胫骨箱顶髋'), kind: 'exercise', mapping: mapping.verify('原培训视频需确认该节点的具体技术动作与身份。'), primaryPathway: 'hip-rotation', progressionLevel: 'P2', role: 'bridge', capabilities: ['hip-rotation', 'hip-extension', 'pelvic-control'] }),
+  node({ id: 'pp05', source: source('PP05', '90/90 胫骨箱顶髋'), kind: 'exercise', mapping: mapping.mapped('shin-box-hip-lift'), primaryPathway: 'hip-rotation', progressionLevel: 'P2', role: 'bridge', capabilities: ['hip-rotation', 'hip-extension', 'pelvic-control'] }),
   node({ id: 'pp06', source: source('PP06', '坐姿骨盆髋走'), kind: 'drill', mapping: mapping.methodOnly(), primaryPathway: 'locomotion', secondaryPathways: ['hip-rotation'], progressionLevel: 'P1', role: 'drill', capabilities: ['pelvic-control', 'weight-shift', 'breathing-control'], breathing: resetBreathing }),
   node({ id: 'pp07', source: source('PP07', '低位鸭步'), kind: 'exercise', mapping: mapping.mapped('duck-walk'), primaryPathway: 'locomotion', secondaryPathways: ['squat', 'frontal-plane'], progressionLevel: 'P3', role: 'optional', capabilities: ['locomotion', 'weight-shift', 'hip-abduction'] }),
   node({ id: 'pp08', source: source('PP08', '侧卧髋内收'), kind: 'exercise', mapping: mapping.mapped('side-lying-hip-adduction'), primaryPathway: 'frontal-plane', secondaryPathways: ['lateral-support'], progressionLevel: 'P1', role: 'foundation', capabilities: ['hip-adduction', 'pelvic-control'] }),
@@ -99,7 +99,7 @@ export const ppMethodNodes: readonly PPMethodNode[] = [
   node({ id: 'pp12', source: source('PP12', '四足跪姿单臂胸椎旋转'), kind: 'variant', mapping: mapping.variant('thoracic-rotation', 'pp12-quadruped-thoracic-rotation'), primaryPathway: 'thoracic-rotation', secondaryPathways: ['support'], progressionLevel: 'P2', role: 'bridge', capabilities: ['rotation', 'shoulder-support', 'pelvic-control'] }),
   node({ id: 'pp13', source: source('PP13', '高位支撑前跨步转体'), kind: 'variant', mapping: mapping.variant('high-plank-step-through', 'pp13-high-plank-step-through-rotation'), primaryPathway: 'integration', secondaryPathways: ['support', 'locomotion', 'thoracic-rotation'], progressionLevel: 'P3', role: 'integration', capabilities: ['shoulder-support', 'anti-rotation', 'rotation', 'locomotion', 'force-transfer'] }),
   node({ id: 'pp14', source: source('PP14', '高位平板前跨步'), kind: 'exercise', mapping: mapping.mapped('high-plank-step-through'), primaryPathway: 'support', secondaryPathways: ['locomotion'], progressionLevel: 'P3', role: 'bridge', capabilities: ['shoulder-support', 'anti-extension', 'weight-shift', 'locomotion'] }),
-  node({ id: 'pp15', source: source('PP15', '支撑膝撞'), kind: 'exercise', mapping: mapping.verify('原培训视频需确认膝撞的具体支撑姿势、方向与动作身份。'), primaryPathway: 'support', progressionLevel: 'P3', role: 'bridge', capabilities: ['shoulder-support', 'anti-extension', 'weight-shift'] }),
+  node({ id: 'pp15', source: source('PP15', '支撑膝撞'), kind: 'exercise', mapping: mapping.mapped('cross-body-plank-knee-drive'), primaryPathway: 'support', progressionLevel: 'P3', role: 'bridge', capabilities: ['shoulder-support', 'anti-extension', 'weight-shift'] }),
   node({ id: 'pp16', source: source('PP16', '平板支撑'), kind: 'exercise', mapping: mapping.mapped('plank'), primaryPathway: 'support', secondaryPathways: ['core'], progressionLevel: 'P2', role: 'base', capabilities: ['shoulder-support', 'anti-extension', 'rib-pelvis-control'] }),
   node({ id: 'pp17', source: source('PP17', '平板位主动收腹 / 骨盆后倾'), kind: 'drill', mapping: mapping.methodOnly(), hostExerciseId: 'plank', primaryPathway: 'support', progressionLevel: 'P1', role: 'drill', capabilities: ['rib-pelvis-control', 'pelvic-control', 'breathing-control'], breathing: resetBreathing, coachNotes: ['该节点是依附于 plank 执行的控制 Drill，不是独立 exercise variant。'] }),
   node({ id: 'pp18', source: source('PP18', '侧支撑转体'), kind: 'variant', mapping: mapping.variant('side-plank', 'pp18-side-plank-rotation'), primaryPathway: 'lateral-support', secondaryPathways: ['thoracic-rotation'], progressionLevel: 'P4', role: 'integration', capabilities: ['anti-lateral-flexion', 'shoulder-support', 'rotation', 'force-transfer'] }),
@@ -145,26 +145,4 @@ export const ppMethodNodeById: ReadonlyMap<PPMethodNodeId, PPMethodNode> = new M
   ppMethodNodes.map((methodNode) => [methodNode.id, methodNode]),
 )
 
-export const ppVerificationLedger: readonly PPVerificationLedgerEntry[] = [
-  {
-    nodeId: 'pp03',
-    sourceId: 'PP03',
-    subject: 'display-category',
-    status: 'open',
-    reason: '动作身份已确定为 deadlift-to-overhead-press；待原技术来源确认 displayCategoryId，不能预设为 power。',
-  },
-  {
-    nodeId: 'pp05',
-    sourceId: 'PP05',
-    subject: 'identity',
-    status: 'open',
-    reason: '仅凭名称无法确认 90/90 胫骨箱顶髋的准确技术动作，需培训原视频。',
-  },
-  {
-    nodeId: 'pp15',
-    sourceId: 'PP15',
-    subject: 'identity',
-    status: 'open',
-    reason: '仅凭名称无法确认支撑膝撞的准确技术动作，需培训原视频。',
-  },
-]
+export const ppVerificationLedger: readonly PPVerificationLedgerEntry[] = []
