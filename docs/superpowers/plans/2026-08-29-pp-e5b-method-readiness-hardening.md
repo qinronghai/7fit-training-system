@@ -57,7 +57,7 @@ The profiles are:
 | Profile ID | Quality criterion domains | Intended nodes |
 |---|---|---|
 | breath-rib-pelvis-foundation | breathing, position, control | pp17, pp20, pp21, pp22, exp-supine-90-90-breathing, exp-side-lying-breathing |
-| hinge-control | position, control, coordination, repetition | pp02, exp-wall-touch-hinge, exp-dowel-three-point-hinge |
+| hinge-control | position, control, coordination, repetition | pp02, pp03, exp-wall-touch-hinge, exp-dowel-three-point-hinge |
 | squat-control | position, control, coordination, repetition | pp01, exp-assisted-sit-to-stand, exp-box-squat |
 | hip-rotation-control | position, control, coordination, tolerance | pp04, pp05, exp-supported-90-90, exp-static-90-90 |
 | hip-extension-control | position, control, coordination, repetition | pp10, exp-glute-bridge-march, exp-single-leg-glute-bridge |
