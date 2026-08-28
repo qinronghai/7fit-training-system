@@ -155,6 +155,71 @@ describe('PP-E3 method type contract', () => {
     ]))
   })
 
+  it('materializes the approved progression map across every pathway', () => {
+    const requiredEdges = [
+      ['pp21', 'exp-supine-90-90-breathing'],
+      ['exp-supine-90-90-breathing', 'pp22'],
+      ['pp22', 'pp26'],
+      ['pp26', 'pp23'],
+      ['pp20', 'exp-quadruped-single-limb-lift'],
+      ['pp20', 'exp-incline-plank'],
+      ['exp-quadruped-single-limb-lift', 'pp11'],
+      ['exp-incline-plank', 'pp16'],
+      ['pp16', 'exp-plank-march'],
+      ['exp-plank-march', 'pp15'],
+      ['exp-incline-plank', 'exp-incline-support-weight-shift'],
+      ['exp-incline-support-weight-shift', 'exp-short-forward-step-high-plank'],
+      ['exp-short-forward-step-high-plank', 'pp14'],
+      ['exp-side-lying-breathing', 'exp-knee-side-plank'],
+      ['exp-knee-side-plank', 'exp-standard-side-plank'],
+      ['exp-standard-side-plank', 'pp19'],
+      ['exp-standard-side-plank', 'exp-side-plank-reach'],
+      ['exp-side-plank-reach', 'exp-partial-side-plank-rotation'],
+      ['exp-partial-side-plank-rotation', 'pp18'],
+      ['exp-wall-touch-hinge', 'exp-dowel-three-point-hinge'],
+      ['exp-dowel-three-point-hinge', 'pp02'],
+      ['pp08', 'exp-long-lever-side-lying-adduction'],
+      ['exp-long-lever-side-lying-adduction', 'exp-short-lever-copenhagen'],
+      ['exp-short-lever-copenhagen', 'exp-full-copenhagen'],
+      ['exp-standing-lateral-weight-shift', 'exp-basic-hip-abduction'],
+      ['exp-basic-hip-abduction', 'pp09'],
+      ['exp-open-book', 'pp12'],
+      ['pp06', 'exp-standing-lateral-weight-shift'],
+      ['exp-standing-lateral-weight-shift', 'exp-standing-march'],
+      ['pp01', 'exp-half-squat-low-locomotion'],
+      ['exp-half-squat-low-locomotion', 'pp07'],
+    ]
+
+    for (const [from, to] of requiredEdges) {
+      expect(ppProgressionEdges).toEqual(expect.arrayContaining([
+        expect.objectContaining({ from, to }),
+      ]))
+    }
+    expect(ppProgressionEdges.length).toBeGreaterThanOrEqual(requiredEdges.length)
+  })
+
+  it('keeps frozen method metadata aligned with pathway semantics', () => {
+    expect(ppMethodNodeById.get('pp06')).toMatchObject({
+      primaryPathway: 'locomotion',
+      secondaryPathways: ['hip-rotation'],
+    })
+    expect(ppMethodNodeById.get('pp07')).toMatchObject({ role: 'optional' })
+    expect(ppMethodNodeById.get('pp08')).toMatchObject({
+      primaryPathway: 'frontal-plane',
+    })
+    expect(ppMethodNodeById.get('exp-long-lever-side-lying-adduction')).toMatchObject({
+      primaryPathway: 'frontal-plane',
+    })
+    expect(ppMethodNodeById.get('exp-open-book')).toMatchObject({
+      kind: 'exercise',
+      mapping: { status: 'mapped', exerciseId: 'side-lying-open-book' },
+    })
+    expect(ppMethodNodeById.get('pp20')).toMatchObject({
+      kind: 'drill',
+      mapping: { status: 'method-only' },
+    })
+  })
+
   it('validates the verification ledger against node mapping without resolving unknown identity', async () => {
     expect(validatePPVerificationLedger(ppVerificationLedger)).toEqual([])
     expect(validateDefaultPPMethodContract()).toEqual([])
