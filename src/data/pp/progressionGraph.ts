@@ -1,3 +1,4 @@
+import { ppCapabilities } from './types'
 import type { PPMethodNode, PPMethodNodeId, PPProgressionEdge } from './types'
 
 export const ppProgressionEdges: readonly PPProgressionEdge[] = [
@@ -326,6 +327,7 @@ export const validatePPProgressionGraph = (
 ): readonly string[] => {
   const errors: string[] = []
   const nodeIds = new Set(nodes.map((node) => node.id))
+  const declaredCapabilities = new Set<string>(ppCapabilities)
   const outgoing = new Map<PPMethodNodeId, PPMethodNodeId[]>()
   const edgeKeys = new Set<string>()
 
@@ -334,6 +336,12 @@ export const validatePPProgressionGraph = (
     if (!nodeIds.has(edge.to)) errors.push(`progression edge target does not exist: ${edge.to}`)
     if (edge.from === edge.to) errors.push(`progression edge is a self-loop: ${edge.from}`)
     if (edgeKeys.has(edgeKey(edge))) errors.push(`duplicate progression edge: ${edgeKey(edge)}`)
+    for (const capability of edge.capabilityDelta) {
+      if (!declaredCapabilities.has(capability)) {
+        errors.push(`progression edge capabilityDelta is not declared: ${capability} (${edge.from} -> ${edge.to})`)
+      }
+    }
+    if (!edge.reason.trim()) errors.push(`progression edge reason is empty: ${edge.from} -> ${edge.to}`)
     edgeKeys.add(edgeKey(edge))
     const targets = outgoing.get(edge.from) ?? []
     targets.push(edge.to)

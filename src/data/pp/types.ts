@@ -36,24 +36,28 @@ export type PPPathway =
   | 'locomotion'
   | 'integration'
 
-export type PPCapability =
-  | 'breathing-control'
-  | 'rib-pelvis-control'
-  | 'anti-extension'
-  | 'anti-rotation'
-  | 'anti-lateral-flexion'
-  | 'contralateral-control'
-  | 'shoulder-support'
-  | 'pelvic-control'
-  | 'hip-extension'
-  | 'hip-hinge'
-  | 'hip-rotation'
-  | 'hip-adduction'
-  | 'hip-abduction'
-  | 'weight-shift'
-  | 'locomotion'
-  | 'rotation'
-  | 'force-transfer'
+export const ppCapabilities = [
+  'breathing-control',
+  'rib-pelvis-control',
+  'anti-extension',
+  'anti-rotation',
+  'anti-lateral-flexion',
+  'contralateral-control',
+  'shoulder-support',
+  'pelvic-control',
+  'hip-extension',
+  'hip-hinge',
+  'hip-rotation',
+  'hip-adduction',
+  'hip-abduction',
+  'weight-shift',
+  'locomotion',
+  'rotation',
+  'force-transfer',
+  'hip-flexion',
+] as const
+
+export type PPCapability = (typeof ppCapabilities)[number]
 
 export type PPProgressionLevel = 'P0' | 'P1' | 'P2' | 'P3' | 'P4'
 
@@ -143,7 +147,7 @@ export type PPProgressionEdge = {
   from: PPMethodNodeId
   to: PPMethodNodeId
   type: 'progression' | 'branch' | 'optional'
-  capabilityDelta: readonly string[]
+  capabilityDelta: readonly PPCapability[]
   reason: string
 }
 

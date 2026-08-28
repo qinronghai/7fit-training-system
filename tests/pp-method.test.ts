@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type {
   PPCanonicalMapping,
+  PPCapability,
+  PPProgressionEdge,
   PPProgressionLevel,
 } from '../src/data/pp/types'
 import {
@@ -22,6 +24,15 @@ import {
   validatePPMethodContract,
   validatePPVerificationLedger,
 } from '../src/data/pp'
+
+const invalidCapabilityEdge: PPProgressionEdge = {
+  from: 'pp20',
+  to: 'pp21',
+  type: 'progression',
+  // @ts-expect-error unknown capability must not compile
+  capabilityDelta: ['unknown-capability'],
+  reason: 'type contract fixture',
+}
 
 describe('PP-E3 method type contract', () => {
   it('exposes the five canonical mapping statuses', () => {
@@ -462,5 +473,43 @@ describe('PP-E3 method type contract', () => {
         reason: 'cycle test edge',
       },
     ])).toContain('progression graph contains a cycle at: pp20')
+  })
+
+  it('enforces declared capability deltas and non-empty edge reasons', () => {
+    const hipFlexionNodes = ppMethodNodes
+      .filter((node) => node.capabilities.includes('hip-flexion' as PPCapability))
+      .map((node) => node.id)
+      .sort()
+    expect(hipFlexionNodes).toEqual([
+      'exp-plank-march',
+      'exp-short-forward-step-high-plank',
+      'pp13',
+      'pp14',
+      'pp15',
+    ])
+
+    const unknownCapabilityErrors = validatePPProgressionGraph(ppMethodNodes, [
+      {
+        from: 'pp20',
+        to: 'pp21',
+        type: 'progression',
+        capabilityDelta: ['unknown-capability'] as unknown as PPCapability[],
+        reason: 'runtime contract fixture',
+      },
+    ])
+    expect(unknownCapabilityErrors).toEqual(expect.arrayContaining([
+      expect.stringContaining('progression edge capabilityDelta is not declared: unknown-capability'),
+    ]))
+    expect(unknownCapabilityErrors.some((error) => error.includes('pp20 -> pp21'))).toBe(true)
+
+    expect(validatePPProgressionGraph(ppMethodNodes, [
+      {
+        from: 'pp20',
+        to: 'pp21',
+        type: 'progression',
+        capabilityDelta: ['force-transfer'],
+        reason: '   ',
+      },
+    ])).toContain('progression edge reason is empty: pp20 -> pp21')
   })
 })
