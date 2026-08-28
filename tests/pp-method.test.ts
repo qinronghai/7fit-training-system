@@ -135,6 +135,10 @@ describe('PP-E3 method type contract', () => {
     expect(ppMethodNodeById.get('exp-standard-side-plank')?.mapping).toEqual({ status: 'mapped', exerciseId: 'side-plank' })
     expect(ppMethodNodeById.get('exp-single-leg-glute-bridge')?.mapping).toEqual({ status: 'mapped', exerciseId: 'single-leg-glute-bridge' })
     expect(ppMethodNodeById.get('exp-standing-march')?.mapping).toEqual({ status: 'mapped', exerciseId: 'standing-march' })
+    for (const node of ppMethodNodes) {
+      if (node.mapping.status !== 'variant') continue
+      expect(canonicalExerciseIds.has(node.mapping.exerciseId)).toBe(true)
+    }
     expect(ppVerificationLedger).toEqual(expect.arrayContaining([
       expect.objectContaining({ nodeId: 'pp03', subject: 'display-category' }),
       expect.objectContaining({ nodeId: 'pp05', subject: 'identity' }),
@@ -142,7 +146,7 @@ describe('PP-E3 method type contract', () => {
     ]))
   })
 
-  it('uses the final 92-exercise registry and passes all PP invariants', () => {
+  it('uses the final 101-exercise registry and passes all PP invariants', () => {
     expect(exercises).toHaveLength(101)
     expect(canonicalExerciseIds).toEqual(new Set(exercises.map((exercise) => exercise.id)))
     expect(canonicalExerciseIds.has('side-plank')).toBe(true)
