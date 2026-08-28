@@ -55,18 +55,16 @@ describe('PP-E3 method type contract', () => {
       return result
     }, {})
 
-    expect(counts).toEqual({
-      mapped: 16,
-      variant: 26,
-      'method-only': 8,
-      'add-candidate': 1,
-      verify: 2,
-    })
+    expect(counts.mapped).toBe(19)
+    expect(counts.variant).toBe(26)
+    expect(counts['method-only']).toBe(8)
+    expect(counts['add-candidate'] ?? 0).toBe(0)
+    expect(counts.verify ?? 0).toBe(0)
     expect(ppMethodNodes.filter((node) => node.source?.sourceId).length).toBe(26)
     expect(ppMethodNodes.filter((node) => !node.source).length).toBe(27)
   })
 
-  it('keeps the approved expansion inventory and the remaining deferred canonical candidate', () => {
+  it('keeps the approved expansion inventory and resolves the final canonical candidates', () => {
     const expansionIds = ppMethodNodes
       .filter((node) => !node.source)
       .map((node) => node.id)
@@ -106,9 +104,7 @@ describe('PP-E3 method type contract', () => {
       .map((node) => node.mapping.status === 'add-candidate' ? node.mapping.proposedExerciseId : null)
       .filter((id): id is string => id !== null)
 
-    expect([...new Set(addCandidateIds)].sort()).toEqual([
-      'deadlift-to-overhead-press',
-    ])
+    expect([...new Set(addCandidateIds)].sort()).toEqual([])
   })
 
   it('keeps PP17 as a method drill hosted by plank', () => {
@@ -119,18 +115,18 @@ describe('PP-E3 method type contract', () => {
     expect(pp17?.kind).toBe('drill')
   })
 
-  it('preserves the PP verification ledger without guessing', () => {
+  it('keeps the PP verification ledger empty after the three resolved mappings', () => {
     expect(ppMethodNodeById.get('pp03')?.mapping).toEqual({
-      status: 'add-candidate',
-      proposedExerciseId: 'deadlift-to-overhead-press',
+      status: 'mapped',
+      exerciseId: 'deadlift-to-overhead-press',
     })
     expect(ppMethodNodeById.get('pp05')?.mapping).toEqual({
-      status: 'verify',
-      reason: '原培训视频需确认该节点的具体技术动作与身份。',
+      status: 'mapped',
+      exerciseId: 'shin-box-hip-lift',
     })
     expect(ppMethodNodeById.get('pp15')?.mapping).toEqual({
-      status: 'verify',
-      reason: '原培训视频需确认膝撞的具体支撑姿势、方向与动作身份。',
+      status: 'mapped',
+      exerciseId: 'cross-body-plank-knee-drive',
     })
     expect(ppMethodNodeById.get('pp07')?.mapping).toEqual({ status: 'mapped', exerciseId: 'duck-walk' })
     expect(ppMethodNodeById.get('pp08')?.mapping).toEqual({ status: 'mapped', exerciseId: 'side-lying-hip-adduction' })
@@ -145,16 +141,15 @@ describe('PP-E3 method type contract', () => {
       if (node.mapping.status !== 'variant') continue
       expect(canonicalExerciseIds.has(node.mapping.exerciseId)).toBe(true)
     }
-    expect(ppVerificationLedger).toEqual(expect.arrayContaining([
-      expect.objectContaining({ nodeId: 'pp03', subject: 'display-category' }),
-      expect.objectContaining({ nodeId: 'pp05', subject: 'identity' }),
-      expect.objectContaining({ nodeId: 'pp15', subject: 'identity' }),
-    ]))
+    expect(ppVerificationLedger).toEqual([])
   })
 
-  it('uses the final 101-exercise registry and passes all PP invariants', () => {
-    expect(exercises).toHaveLength(101)
+  it('uses the final 104-exercise registry and passes all PP invariants', () => {
+    expect(exercises).toHaveLength(104)
     expect(canonicalExerciseIds).toEqual(new Set(exercises.map((exercise) => exercise.id)))
+    expect(canonicalExerciseIds.has('deadlift-to-overhead-press')).toBe(true)
+    expect(canonicalExerciseIds.has('shin-box-hip-lift')).toBe(true)
+    expect(canonicalExerciseIds.has('cross-body-plank-knee-drive')).toBe(true)
     expect(canonicalExerciseIds.has('side-plank')).toBe(true)
     expect(canonicalExerciseIds.has('high-plank-step-through')).toBe(true)
     expect(canonicalExerciseIds.has('side-lying-hip-adduction')).toBe(true)
