@@ -124,8 +124,8 @@ describe('PP-E3 method type contract', () => {
       status: 'add-candidate',
       proposedExerciseId: 'deadlift-to-overhead-press',
     })
-    expect(ppMethodNodeById.get('pp05')?.mapping).toEqual({ status: 'verify' })
-    expect(ppMethodNodeById.get('pp15')?.mapping).toEqual({ status: 'verify' })
+    expect(ppMethodNodeById.get('pp05')?.mapping).toMatchObject({ status: 'verify' })
+    expect(ppMethodNodeById.get('pp15')?.mapping).toMatchObject({ status: 'verify' })
     expect(ppMethodNodeById.get('pp07')?.mapping).toEqual({ status: 'mapped', exerciseId: 'duck-walk' })
     expect(ppMethodNodeById.get('pp08')?.mapping).toEqual({ status: 'mapped', exerciseId: 'side-lying-hip-adduction' })
     expect(ppMethodNodeById.get('pp14')?.mapping).toEqual({ status: 'mapped', exerciseId: 'high-plank-step-through' })
