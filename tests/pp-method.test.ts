@@ -56,17 +56,17 @@ describe('PP-E3 method type contract', () => {
     }, {})
 
     expect(counts).toEqual({
-      mapped: 7,
+      mapped: 16,
       variant: 26,
       'method-only': 8,
-      'add-candidate': 10,
+      'add-candidate': 1,
       verify: 2,
     })
     expect(ppMethodNodes.filter((node) => node.source?.sourceId).length).toBe(26)
     expect(ppMethodNodes.filter((node) => !node.source).length).toBe(27)
   })
 
-  it('keeps the approved expansion inventory and ten deferred canonical candidates', () => {
+  it('keeps the approved expansion inventory and the remaining deferred canonical candidate', () => {
     const expansionIds = ppMethodNodes
       .filter((node) => !node.source)
       .map((node) => node.id)
@@ -108,15 +108,6 @@ describe('PP-E3 method type contract', () => {
 
     expect([...new Set(addCandidateIds)].sort()).toEqual([
       'deadlift-to-overhead-press',
-      'duck-walk',
-      'high-plank-step-through',
-      'pilates-criss-cross',
-      'pilates-double-leg-stretch',
-      'pilates-single-leg-stretch',
-      'side-lying-hip-adduction',
-      'side-plank',
-      'single-leg-glute-bridge',
-      'standing-march',
     ])
   })
 
@@ -133,8 +124,27 @@ describe('PP-E3 method type contract', () => {
       status: 'add-candidate',
       proposedExerciseId: 'deadlift-to-overhead-press',
     })
-    expect(ppMethodNodeById.get('pp05')?.mapping.status).toBe('verify')
-    expect(ppMethodNodeById.get('pp15')?.mapping.status).toBe('verify')
+    expect(ppMethodNodeById.get('pp05')?.mapping).toEqual({
+      status: 'verify',
+      reason: '原培训视频需确认该节点的具体技术动作与身份。',
+    })
+    expect(ppMethodNodeById.get('pp15')?.mapping).toEqual({
+      status: 'verify',
+      reason: '原培训视频需确认膝撞的具体支撑姿势、方向与动作身份。',
+    })
+    expect(ppMethodNodeById.get('pp07')?.mapping).toEqual({ status: 'mapped', exerciseId: 'duck-walk' })
+    expect(ppMethodNodeById.get('pp08')?.mapping).toEqual({ status: 'mapped', exerciseId: 'side-lying-hip-adduction' })
+    expect(ppMethodNodeById.get('pp14')?.mapping).toEqual({ status: 'mapped', exerciseId: 'high-plank-step-through' })
+    expect(ppMethodNodeById.get('pp23')?.mapping).toEqual({ status: 'mapped', exerciseId: 'pilates-single-leg-stretch' })
+    expect(ppMethodNodeById.get('pp24')?.mapping).toEqual({ status: 'mapped', exerciseId: 'pilates-double-leg-stretch' })
+    expect(ppMethodNodeById.get('pp25')?.mapping).toEqual({ status: 'mapped', exerciseId: 'pilates-criss-cross' })
+    expect(ppMethodNodeById.get('exp-standard-side-plank')?.mapping).toEqual({ status: 'mapped', exerciseId: 'side-plank' })
+    expect(ppMethodNodeById.get('exp-single-leg-glute-bridge')?.mapping).toEqual({ status: 'mapped', exerciseId: 'single-leg-glute-bridge' })
+    expect(ppMethodNodeById.get('exp-standing-march')?.mapping).toEqual({ status: 'mapped', exerciseId: 'standing-march' })
+    for (const node of ppMethodNodes) {
+      if (node.mapping.status !== 'variant') continue
+      expect(canonicalExerciseIds.has(node.mapping.exerciseId)).toBe(true)
+    }
     expect(ppVerificationLedger).toEqual(expect.arrayContaining([
       expect.objectContaining({ nodeId: 'pp03', subject: 'display-category' }),
       expect.objectContaining({ nodeId: 'pp05', subject: 'identity' }),
@@ -142,9 +152,13 @@ describe('PP-E3 method type contract', () => {
     ]))
   })
 
-  it('uses the final 92-exercise registry and passes all PP invariants', () => {
-    expect(exercises).toHaveLength(92)
+  it('uses the final 101-exercise registry and passes all PP invariants', () => {
+    expect(exercises).toHaveLength(101)
     expect(canonicalExerciseIds).toEqual(new Set(exercises.map((exercise) => exercise.id)))
+    expect(canonicalExerciseIds.has('side-plank')).toBe(true)
+    expect(canonicalExerciseIds.has('high-plank-step-through')).toBe(true)
+    expect(canonicalExerciseIds.has('side-lying-hip-adduction')).toBe(true)
+    expect(canonicalExerciseIds.has('duck-walk')).toBe(true)
     expect(validatePPMethodContract(ppMethodNodes, ppProgressionEdges, canonicalExerciseIds)).toEqual([])
   })
 
