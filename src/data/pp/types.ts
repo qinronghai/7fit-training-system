@@ -94,6 +94,29 @@ export type PPQualityGate = {
   passRule: 'all'
 }
 
+export const ppMethodReadinessProfileIds = [
+  'breath-rib-pelvis-foundation',
+  'hinge-control',
+  'squat-control',
+  'hip-rotation-control',
+  'hip-extension-control',
+  'frontal-plane-weight-shift',
+  'anterior-support',
+  'dynamic-support',
+  'lateral-support',
+  'anti-extension-core',
+  'rotation-integration',
+  'locomotion',
+] as const
+
+export type PPMethodReadinessProfileId =
+  (typeof ppMethodReadinessProfileIds)[number]
+
+export type PPMethodReadinessProfile = {
+  qualityGate: PPQualityGate
+  commonCompensations: readonly string[]
+}
+
 export type PPMethodNode = {
   id: PPMethodNodeId
   source?: {
@@ -109,6 +132,7 @@ export type PPMethodNode = {
   progressionLevel: PPProgressionLevel
   role: PPMethodNodeRole
   capabilities: readonly PPCapability[]
+  readinessProfile: PPMethodReadinessProfileId
   breathing: PPBreathingStrategy
   qualityGate: PPQualityGate
   commonCompensations: readonly string[]

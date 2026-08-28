@@ -3,11 +3,15 @@ import type {
   PPCanonicalMapping,
   PPProgressionLevel,
 } from '../src/data/pp/types'
-import { ppCanonicalMappingStatuses } from '../src/data/pp/types'
+import {
+  ppCanonicalMappingStatuses,
+  ppMethodReadinessProfileIds,
+} from '../src/data/pp/types'
 import { exercises } from '../src/data/exercises/exercises'
 import {
   ppMethodNodeById,
   ppMethodNodes,
+  ppMethodReadinessProfiles,
   ppVerificationLedger,
 } from '../src/data/pp/methodNodes'
 import { ppProgressionEdges } from '../src/data/pp/progressionGraph'
@@ -113,6 +117,31 @@ describe('PP-E3 method type contract', () => {
     expect(pp17?.mapping).toEqual({ status: 'method-only' })
     expect(pp17?.hostExerciseId).toBe('plank')
     expect(pp17?.kind).toBe('drill')
+  })
+
+  it('assigns every PP node to one of the 12 reusable readiness profiles', () => {
+    expect(ppMethodReadinessProfileIds).toHaveLength(12)
+    expect(new Set(ppMethodNodes.map((node) => node.readinessProfile)).size).toBe(12)
+    expect(Object.keys(ppMethodReadinessProfiles).sort()).toEqual(
+      [...ppMethodReadinessProfileIds].sort(),
+    )
+
+    for (const methodNode of ppMethodNodes) {
+      expect(ppMethodReadinessProfiles[methodNode.readinessProfile]).toBeDefined()
+      expect(methodNode.qualityGate.passRule).toBe('all')
+      expect(methodNode.qualityGate.criteria.length).toBeGreaterThan(0)
+      expect(methodNode.commonCompensations.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps the approved profile assignments for key method nodes', () => {
+    expect(ppMethodNodeById.get('pp03')?.readinessProfile).toBe('hinge-control')
+    expect(ppMethodNodeById.get('pp05')?.readinessProfile).toBe('hip-rotation-control')
+    expect(ppMethodNodeById.get('pp16')?.readinessProfile).toBe('anterior-support')
+    expect(ppMethodNodeById.get('pp13')?.readinessProfile).toBe('rotation-integration')
+    expect(ppMethodNodeById.get('pp23')?.readinessProfile).toBe('anti-extension-core')
+    expect(ppMethodNodeById.get('pp24')?.readinessProfile).toBe('anti-extension-core')
+    expect(ppMethodNodeById.get('pp26')?.readinessProfile).toBe('anti-extension-core')
   })
 
   it('keeps the PP verification ledger empty after the three resolved mappings', () => {
