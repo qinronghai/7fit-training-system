@@ -90,6 +90,7 @@ const displayCategoryByExerciseId: Record<string, ExerciseDisplayCategoryId> = {
   'side-lying-hip-adduction': 'lower',
   'side-lying-open-book': 'mobility',
   'side-plank': 'core',
+  'cross-body-plank-knee-drive': 'core',
   'single-arm-cable-row': 'pull',
   'single-arm-lat-pulldown': 'pull',
   'single-leg-glute-bridge': 'glute',
@@ -102,6 +103,8 @@ const displayCategoryByExerciseId: Record<string, ExerciseDisplayCategoryId> = {
   'supine-open-book': 'mobility',
   'single-leg-stand': 'lower',
   'wall-slide': 'shoulder',
+  'deadlift-to-overhead-press': 'shoulder',
+  'shin-box-hip-lift': 'mobility',
 }
 
 type ReviewedExerciseSeed = Pick<
@@ -1044,6 +1047,33 @@ const reviewedExerciseSeeds: readonly ReviewedExerciseSeed[] = [
     patternIds: ["vpush"],
     equipment: ["墙面"],
     techniqueLevel: 'tl0',
+  },
+  {
+    id: 'deadlift-to-overhead-press',
+    name: '硬拉推肩',
+    englishName: 'Deadlift to Overhead Press',
+    aliases: [],
+    patternIds: ['hinge', 'vpush'],
+    equipment: ['杠铃', '哑铃', '壶铃'],
+    techniqueLevel: 'tl3',
+  },
+  {
+    id: 'shin-box-hip-lift',
+    name: '胫骨箱顶髋',
+    englishName: 'Shin Box Hip Lift',
+    aliases: [],
+    patternIds: ['hip', 'rotation'],
+    equipment: ['自重'],
+    techniqueLevel: 'tl1',
+  },
+  {
+    id: 'cross-body-plank-knee-drive',
+    name: '高位平板对侧提膝',
+    englishName: 'Cross-Body Plank Knee Drive',
+    aliases: [],
+    patternIds: ['core', 'rotation'],
+    equipment: ['自重'],
+    techniqueLevel: 'tl3',
   },
 ]
 
