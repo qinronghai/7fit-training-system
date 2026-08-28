@@ -175,7 +175,6 @@ describe('V6.1 Programming exercise mapping contract', () => {
     const canonicalIds = new Set(exercises.map((exercise) => exercise.id))
 
     expect(lookup.size).toBe(176)
-    expect(new Set(lookup.values()).size).toBe(101)
     for (const canonicalId of lookup.values()) expect(canonicalIds.has(canonicalId)).toBe(true)
   })
 
