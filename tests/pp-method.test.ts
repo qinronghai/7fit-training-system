@@ -7,6 +7,7 @@ import type {
 } from '../src/data/pp/types'
 import {
   ppCanonicalMappingStatuses,
+  ppCapabilities,
   ppMethodReadinessProfileIds,
 } from '../src/data/pp/types'
 import { exercises } from '../src/data/exercises/exercises'
@@ -476,6 +477,29 @@ describe('PP-E3 method type contract', () => {
   })
 
   it('enforces declared capability deltas and non-empty edge reasons', () => {
+    expect(ppCapabilities).toHaveLength(18)
+    expect(new Set(ppCapabilities)).toHaveLength(18)
+    expect([...ppCapabilities].sort()).toEqual([
+      'anti-extension',
+      'anti-lateral-flexion',
+      'anti-rotation',
+      'breathing-control',
+      'contralateral-control',
+      'force-transfer',
+      'hip-abduction',
+      'hip-adduction',
+      'hip-extension',
+      'hip-flexion',
+      'hip-hinge',
+      'hip-rotation',
+      'locomotion',
+      'pelvic-control',
+      'rib-pelvis-control',
+      'rotation',
+      'shoulder-support',
+      'weight-shift',
+    ].sort())
+
     const hipFlexionNodes = ppMethodNodes
       .filter((node) => node.capabilities.includes('hip-flexion' as PPCapability))
       .map((node) => node.id)
@@ -501,6 +525,17 @@ describe('PP-E3 method type contract', () => {
       expect.stringContaining('progression edge capabilityDelta is not declared: unknown-capability'),
     ]))
     expect(unknownCapabilityErrors.some((error) => error.includes('pp20 -> pp21'))).toBe(true)
+
+    const nonSubsetErrors = validatePPProgressionGraph(ppMethodNodes, [
+      {
+        from: 'pp20',
+        to: 'pp21',
+        type: 'progression',
+        capabilityDelta: ['force-transfer'],
+        reason: 'declared capability semantics fixture',
+      },
+    ])
+    expect(nonSubsetErrors).toEqual([])
 
     expect(validatePPProgressionGraph(ppMethodNodes, [
       {
