@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, Check, ChevronRight, Copy, ExternalLink, Heart, Moon, Search, ShieldAlert, Sun } from 'lucide-react'
 import { getLibraryAction, getLibraryActionId, getPattern, getPostpartumMovement, getTemplate, librarySections, movementPatterns, postpartumMovements, templates, type ActionEntity, type Level, type Template } from './data/content'
 import { resolveFemaleProgrammingTemplates } from './data/pp'
+import { getPostpartumPresentationBridgeRecord } from './data/postpartumPresentationBridge'
 import { getRoute, navigate, type Route } from './lib/router'
 import { addRecent, getFavorites, getRecent, toggleFavorite } from './lib/storage'
 import { ThemeProvider, useTheme } from './lib/theme'
@@ -254,12 +255,44 @@ const InlineVideo = ({ url, title, label }: { url: string; title: string; label:
   return <div className="video-panel"><div className="video-panel-head"><b>{label}</b><a href={url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> 新窗口打开</a></div>{embed ? <iframe title={title} src={embed} loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /> : <div className="video-fallback"><ExternalLink size={18} /><p>该视频站点不支持内嵌播放</p><a href={url} target="_blank" rel="noreferrer">点击打开视频</a></div>}</div>
 }
 
+const MethodField = ({ label, value }: { label: string; value: string }) => <div><small>{label}</small><p>{value}</p></div>
+
+const PostpartumMethodSurface = ({ methodNode }: { methodNode: NonNullable<ReturnType<typeof getPostpartumPresentationBridgeRecord>>['methodNode'] }) => {
+  const { mapping } = methodNode
+  const secondaryPathways = methodNode.secondaryPathways?.join(' · ')
+  return <section className="info-card postpartum-method-panel">
+    <div className="card-content-heading"><ShieldAlert size={18} /><div><h2>方法层（只读）</h2><p>来自 PP Method 与 presentation bridge；不改变原教练卡内容。</p></div></div>
+    <div className="card-content-grid">
+      <MethodField label="Method ID" value={methodNode.id} />
+      <MethodField label="Method P-level" value={methodNode.progressionLevel} />
+      <MethodField label="Kind" value={methodNode.kind} />
+      <MethodField label="Role" value={methodNode.role} />
+      <MethodField label="Primary pathway" value={methodNode.primaryPathway} />
+      {secondaryPathways && <MethodField label="Secondary pathways" value={secondaryPathways} />}
+      <MethodField label="Mapping" value={mapping.status} />
+      {'exerciseId' in mapping && <MethodField label="Canonical exercise" value={mapping.exerciseId} />}
+      {'variantId' in mapping && <MethodField label="Variant" value={mapping.variantId} />}
+      {'proposedExerciseId' in mapping && <MethodField label="Proposed exercise" value={mapping.proposedExerciseId} />}
+      {'reason' in mapping && <MethodField label="Mapping reason" value={mapping.reason} />}
+      {methodNode.hostExerciseId && <MethodField label="Host exercise" value={methodNode.hostExerciseId} />}
+      <MethodField label="Breathing" value={methodNode.breathing.mode} />
+      <MethodField label="Pressure intent" value={methodNode.breathing.pressureIntent} />
+      {methodNode.breathing.inhale && <MethodField label="Inhale" value={methodNode.breathing.inhale} />}
+      {methodNode.breathing.exhale && <MethodField label="Exhale" value={methodNode.breathing.exhale} />}
+    </div>
+    <div className="coach-points"><b>Quality gate · {methodNode.qualityGate.passRule}</b>{methodNode.qualityGate.criteria.map((criterion) => <span key={criterion.code}>· {criterion.requirement}</span>)}</div>
+    <div className="coach-points"><b>Common compensations</b>{methodNode.commonCompensations.map((compensation) => <span key={compensation}>· {compensation}</span>)}</div>
+    {methodNode.coachNotes && <div className="coach-points"><b>Method coach notes</b>{methodNode.coachNotes.map((note) => <span key={note}>· {note}</span>)}</div>}
+  </section>
+}
+
 const PostpartumDetailPage = ({ id }: { id: string }) => {
-  const item = getPostpartumMovement(id)
+  const bridgeRecord = getPostpartumPresentationBridgeRecord(id)
+  const item = bridgeRecord?.presentation
   const [favorites, setFavorites] = useState(getFavorites())
   useEffect(() => { if (item) addRecent(item.id) }, [item])
-  if (!item) return <EmptyRoute title="专项动作不存在" href="#/library/postpartum" />
-  return <div className="page detail-page pp-detail-page"><div className="sticky-context"><a href="#/library/postpartum"><ArrowLeft size={16} /> PP 动作库</a><span>{item.id.toUpperCase()} · {item.category}</span><button className="context-favorite" onClick={() => setFavorites(toggleFavorite(item.id))} aria-label={favorites.includes(item.id) ? '取消收藏' : '收藏动作'}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'} /></button></div><div className="detail-title"><Eyebrow>POSTPARTUM MOVEMENT · {item.id.toUpperCase()}</Eyebrow><h1>{item.name}</h1><p>原教练卡内容已转为文字版，保持呼吸、控制和症状反馈优先。</p><div className="tag-row"><Pill>{item.level.map((levelItem) => levelLabel[levelItem]).join(' → ')}</Pill><Pill>{item.category}</Pill>{item.movementPatterns.map((pattern) => <a className="pill link-pill" href={`#/patterns/${pattern}`} key={pattern}>#{getPattern(pattern)?.name}</a>)}</div></div><section className="safety-banner prominent"><ShieldAlert size={23} /><div><b>先看安全信号</b><p>{item.riskNotes[0]}</p></div></section><section className="card-content-panel"><div className="card-content-heading"><Bookmark size={18} /><div><h2>教练卡内容（文字版）</h2><p>已提取为可搜索、可复制的网页内容，不依赖图片查看。</p></div></div><div className="card-content-grid"><div><small>动作概述</small><p>{item.cardContent.overview}</p></div><div><small>训练目标</small><p>{item.cardContent.trainingTarget}</p></div><div><small>建位与呼吸</small><p>{item.cardContent.setup}</p></div><div><small>退阶 / 进阶</small><p>{item.cardContent.progression}</p></div></div><div className="coach-points"><b>教练提示</b>{item.cardContent.coachingPoints.map((point) => <span key={point}>· {point}</span>)}</div></section><section className="video-section"><SectionHeading title="视频指导" action={<span className="muted">可直接播放</span>} /><div className="video-grid"><InlineVideo url={item.primaryVideo} title={`${item.id.toUpperCase()} 主视频`} label="主视频" /><InlineVideo url={item.secondaryVideo} title={`${item.id.toUpperCase()} 备用视频`} label="备用视频" /></div></section><div className="detail-columns"><section className="info-card"><h2>动作执行</h2>{item.goals.map((goal) => <p key={goal}>· {goal}</p>)}{item.coachCues.map((cue) => <p key={cue}>· {cue}</p>)}</section><section className="info-card"><h2>安全与错误</h2>{item.commonErrors.map((error) => <p key={error}>· {error}</p>)}<p><b>停止信号：</b>{item.cardContent.stopSignals.join(' · ')}</p></section></div></div>
+  if (!item || !bridgeRecord) return <EmptyRoute title="专项动作不存在" href="#/library/postpartum" />
+  return <div className="page detail-page pp-detail-page"><div className="sticky-context"><a href="#/library/postpartum"><ArrowLeft size={16} /> PP 动作库</a><span>{item.id.toUpperCase()} · {item.category}</span><button className="context-favorite" onClick={() => setFavorites(toggleFavorite(item.id))} aria-label={favorites.includes(item.id) ? '取消收藏' : '收藏动作'}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'} /></button></div><div className="detail-title"><Eyebrow>POSTPARTUM MOVEMENT · {item.id.toUpperCase()}</Eyebrow><h1>{item.name}</h1><p>原教练卡内容已转为文字版，保持呼吸、控制和症状反馈优先。</p><div className="tag-row"><Pill>{item.level.map((levelItem) => levelLabel[levelItem]).join(' → ')}</Pill><Pill>{item.category}</Pill>{item.movementPatterns.map((pattern) => <a className="pill link-pill" href={`#/patterns/${pattern}`} key={pattern}>#{getPattern(pattern)?.name}</a>)}</div></div><section className="safety-banner prominent"><ShieldAlert size={23} /><div><b>先看安全信号</b><p>{item.riskNotes[0]}</p></div></section><section className="card-content-panel"><div className="card-content-heading"><Bookmark size={18} /><div><h2>教练卡内容（文字版）</h2><p>已提取为可搜索、可复制的网页内容，不依赖图片查看。</p></div></div><div className="card-content-grid"><div><small>动作概述</small><p>{item.cardContent.overview}</p></div><div><small>训练目标</small><p>{item.cardContent.trainingTarget}</p></div><div><small>建位与呼吸</small><p>{item.cardContent.setup}</p></div><div><small>退阶 / 进阶</small><p>{item.cardContent.progression}</p></div></div><div className="coach-points"><b>教练提示</b>{item.cardContent.coachingPoints.map((point) => <span key={point}>· {point}</span>)}</div></section><PostpartumMethodSurface methodNode={bridgeRecord.methodNode} /><section className="video-section"><SectionHeading title="视频指导" action={<span className="muted">可直接播放</span>} /><div className="video-grid"><InlineVideo url={item.primaryVideo} title={`${item.id.toUpperCase()} 主视频`} label="主视频" /><InlineVideo url={item.secondaryVideo} title={`${item.id.toUpperCase()} 备用视频`} label="备用视频" /></div></section><div className="detail-columns"><section className="info-card"><h2>动作执行</h2>{item.goals.map((goal) => <p key={goal}>· {goal}</p>)}{item.coachCues.map((cue) => <p key={cue}>· {cue}</p>)}</section><section className="info-card"><h2>安全与错误</h2>{item.commonErrors.map((error) => <p key={error}>· {error}</p>)}<p><b>停止信号：</b>{item.cardContent.stopSignals.join(' · ')}</p></section></div></div>
 }
 
 const PostpartumCard = ({ item }: { item: ActionEntity }) => <a className="pp-card" href={`#/postpartum/${item.id}`}><div className="pp-card-text"><div className="card-meta"><span>{item.id.toUpperCase()}</span><span>{item.level.map((level) => levelLabel[level]).join(' → ')}</span></div><h3>{item.name}</h3><p>{item.category}</p><span className="text-card-badge">文字教练卡 · 视频</span></div></a>

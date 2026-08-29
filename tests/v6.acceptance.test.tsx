@@ -13,7 +13,9 @@ import {
 import { getRoute } from '../src/lib/router'
 import { buildTemplateCopyText } from '../src/lib/template-copy'
 import { App } from '../src/App'
+import appSource from '../src/App.tsx?raw'
 import { resolveFemaleProgrammingTemplates } from '../src/data/pp'
+import { getPostpartumPresentationBridgeRecord } from '../src/data/postpartumPresentationBridge'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
@@ -253,8 +255,76 @@ describe('7Fit V6 routing and shell', () => {
     window.location.hash = '#/postpartum/pp01'
     render(<App />)
     expect(screen.getByText('教练卡内容（文字版）')).toBeInTheDocument()
+    expect(screen.getByText('L1 → L2')).toBeInTheDocument()
     expect(screen.getByTitle('PP01 主视频')).toBeInTheDocument()
     expect(document.querySelector('.pp-detail-page img')).toBeNull()
+  })
+
+  it('renders frozen Method metadata as a separate read-only surface beside legacy PP01 presentation', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp01')!
+    if (record.methodNode.mapping.status !== 'variant') throw new Error('Expected PP01 to be a variant mapping')
+
+    window.location.hash = '#/postpartum/pp01'
+    render(<App />)
+
+    expect(screen.getByText('教练卡内容（文字版）')).toBeInTheDocument()
+    const methodHeading = screen.getByRole('heading', { level: 2, name: '方法层（只读）' })
+    const methodSection = methodHeading.closest('section')
+    if (!(methodSection instanceof HTMLElement)) throw new Error('Missing postpartum Method section')
+    const method = within(methodSection)
+
+    expect(method.getByText(record.methodNode.id)).toBeInTheDocument()
+    expect(method.getByText(record.methodNode.progressionLevel)).toBeInTheDocument()
+    expect(method.getAllByText(record.methodNode.kind)).toHaveLength(2)
+    expect(method.getByText(record.methodNode.role)).toBeInTheDocument()
+    expect(method.getAllByText(record.methodNode.primaryPathway)).toHaveLength(2)
+    expect(method.getAllByText(record.methodNode.mapping.status)).toHaveLength(2)
+    expect(method.getByText(record.methodNode.mapping.variantId)).toBeInTheDocument()
+    expect(method.getByText(record.methodNode.breathing.mode)).toBeInTheDocument()
+    expect(method.getByText(record.methodNode.breathing.pressureIntent)).toBeInTheDocument()
+    for (const criterion of record.methodNode.qualityGate.criteria) {
+      expect(method.getByText(new RegExp(criterion.requirement))).toBeInTheDocument()
+    }
+    for (const compensation of record.methodNode.commonCompensations) {
+      expect(method.getByText(new RegExp(compensation))).toBeInTheDocument()
+    }
+  })
+
+  it('keeps method-only PP17 distinct from canonical exercise identity while exposing its host', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp17')!
+    if (record.methodNode.mapping.status !== 'method-only' || !record.methodNode.hostExerciseId) {
+      throw new Error('Expected PP17 to be a method-only node with a host exercise')
+    }
+
+    window.location.hash = '#/postpartum/pp17'
+    render(<App />)
+
+    const methodHeading = screen.getByRole('heading', { level: 2, name: '方法层（只读）' })
+    const methodSection = methodHeading.closest('section')
+    if (!(methodSection instanceof HTMLElement)) throw new Error('Missing postpartum Method section')
+    const method = within(methodSection)
+
+    expect(method.getByText('method-only')).toBeInTheDocument()
+    expect(method.getAllByText('drill')).toHaveLength(2)
+    const hostLabel = method.getByText('Host exercise')
+    expect(hostLabel.nextElementSibling).toHaveTextContent(record.methodNode.hostExerciseId)
+    expect(method.queryByText('canonical exercise')).toBeNull()
+  })
+
+  it('keeps the existing safe empty route for an unknown postpartum id', () => {
+    window.location.hash = '#/postpartum/does-not-exist'
+    render(<App />)
+
+    expect(screen.getByRole('heading', { level: 1, name: '专项动作不存在' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '返回' })).toHaveAttribute('href', '#/library/postpartum')
+  })
+
+  it('keeps App dependent on the frozen bridge instead of rebuilding the Method join', () => {
+    expect(appSource).toContain("getPostpartumPresentationBridgeRecord")
+    expect(appSource).not.toMatch(/from ['"]\.\/data\/pp\/methodNodes['"]/
+    )
+    expect(appSource).not.toMatch(/\b(?:ppMethodNodeById|ppMethodNodes)\b/)
+    expect(appSource.match(/getPostpartumPresentationBridgeRecord/g)).toHaveLength(3)
   })
 
   it('renders a separate female runtime section on the templates page with eight dedicated links', () => {
