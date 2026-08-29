@@ -79,19 +79,24 @@ const entry = (
   demand,
 })
 
+const rolesForDemand = (
+  demand: PPFemaleDemand,
+  roles?: readonly PPFemaleChallengeRole[],
+): readonly PPFemaleChallengeRole[] => roles ?? (demand === 'HIGH' ? ['PRIMARY_CHALLENGE'] : ppFemaleChallengeRoles)
+
 const direct = (
   nodeId: PPMethodNodeId,
   slots: readonly PPFemaleSlot[],
   demand: PPFemaleDemand,
-  roles: readonly PPFemaleChallengeRole[] = ppFemaleChallengeRoles,
-) => entry(nodeId, 'A_DIRECT', slots, roles, demand)
+  roles?: readonly PPFemaleChallengeRole[],
+) => entry(nodeId, 'A_DIRECT', slots, rolesForDemand(demand, roles), demand)
 
 const conditional = (
   nodeId: PPMethodNodeId,
   slots: readonly PPFemaleSlot[],
   demand: PPFemaleDemand,
-  roles: readonly PPFemaleChallengeRole[] = ppFemaleChallengeRoles,
-) => entry(nodeId, 'B_CONDITIONAL', slots, roles, demand)
+  roles?: readonly PPFemaleChallengeRole[],
+) => entry(nodeId, 'B_CONDITIONAL', slots, rolesForDemand(demand, roles), demand)
 
 const methodOnly = (nodeId: PPMethodNodeId) => entry(
   nodeId,

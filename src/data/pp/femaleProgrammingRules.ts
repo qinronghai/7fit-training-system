@@ -58,6 +58,13 @@ export const validateFemaleProgrammingPolicy = (
     if (!ppFemaleEligibilities.includes(entry.eligibility) || !ppFemaleDemands.includes(entry.demand)) {
       issues.push(issue('POLICY_COVERAGE', `invalid policy enum: ${entry.nodeId}`, entry.nodeId))
     }
+    if (entry.demand === 'HIGH' && (
+      entry.allowedChallengeRoles.length !== 1
+      || !entry.allowedChallengeRoles.includes('PRIMARY_CHALLENGE')
+      || entry.allowedChallengeRoles.includes('SUPPORTING')
+    )) {
+      issues.push(issue('POLICY_COVERAGE', `high-demand policy must allow only PRIMARY_CHALLENGE: ${entry.nodeId}`, entry.nodeId))
+    }
     if (entry.eligibility === 'C_METHOD_ONLY') {
       if (entry.allowedSlots.length || entry.allowedChallengeRoles.length || entry.demand !== 'NONE') {
         issues.push(issue('POLICY_COVERAGE', `method-only policy is selectable: ${entry.nodeId}`, entry.nodeId))

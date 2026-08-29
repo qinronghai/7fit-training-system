@@ -67,6 +67,23 @@ describe('PP-F1 female programming policy contract', () => {
     }
   })
 
+  it('allows HIGH-demand entries to be used only as the primary challenge', () => {
+    const highDemandEntries = ppFemaleProgrammingPolicy.filter((entry) => entry.demand === 'HIGH')
+    expect(highDemandEntries).toHaveLength(18)
+    for (const entry of highDemandEntries) {
+      expect(entry.allowedChallengeRoles).toEqual(['PRIMARY_CHALLENGE'])
+    }
+  })
+
+  it('rejects a policy contract that allows HIGH demand as SUPPORTING', () => {
+    const invalidPolicy = ppFemaleProgrammingPolicy.map((entry) => entry.demand === 'HIGH'
+      ? { ...entry, allowedChallengeRoles: ['PRIMARY_CHALLENGE', 'SUPPORTING'] as const }
+      : entry)
+
+    expect(validateFemaleProgrammingPolicy(invalidPolicy).map((item) => item.code))
+      .toContain('POLICY_COVERAGE')
+  })
+
   it('allows only HIP, SUPPORT, and CORE as policy slots', () => {
     expect(ppFemaleSlots).toEqual(['HIP', 'SUPPORT', 'CORE'])
     for (const entry of ppFemaleProgrammingPolicy) {
@@ -112,6 +129,7 @@ describe('PP-F1 female programming policy contract', () => {
       CORE: { nodeId: 'pp24', challengeRole: 'SUPPORTING' },
     }, { readyConditionalNodeIds: ['pp03', 'pp18', 'pp24'] })
     expect(issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'CHALLENGE_ROLE_NOT_ALLOWED',
       'HIGH_DEMAND_NOT_PRIMARY',
       'HIGH_DEMAND_LIMIT',
       'DEMAND_BUDGET_EXCEEDED',
