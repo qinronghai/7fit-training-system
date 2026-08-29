@@ -15,8 +15,7 @@ import { buildTemplateCopyText } from '../src/lib/template-copy'
 import { App } from '../src/App'
 import appSource from '../src/App.tsx?raw'
 import { resolveFemaleProgrammingTemplates } from '../src/data/pp'
-import { getPostpartumPresentationBridgeRecord } from '../src/data/postpartumPresentationBridge'
-import { postpartumPresentationBridgeCatalog } from '../src/data/postpartumPresentationBridge'
+import { getPostpartumPresentationBridgeRecord, postpartumPresentationBridgeCatalog } from '../src/data/postpartumPresentationBridge'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
@@ -253,6 +252,63 @@ describe('7Fit V6 routing and shell', () => {
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /夜间|浅色|主题/ })).toBeInTheDocument()
     expect(screen.getByText('教练工作台')).toBeInTheDocument()
+  })
+
+  it('keeps Home PP search backed by bridge Presentation data and preserves recent behavior', () => {
+    const record = postpartumPresentationBridgeCatalog.find((item) => item.presentation.id === 'pp17')!
+    window.location.hash = '#/home'
+    render(<App />)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'PP17' } })
+    const result = screen.getByRole('option')
+    expect(result).toHaveTextContent(`PP17 · ${record.presentation.name}`)
+    expect(result).toHaveTextContent(`产后专项 · ${record.presentation.category}`)
+    expect(result).toHaveAttribute('href', '#/postpartum/pp17')
+
+    fireEvent.click(result)
+    expect(JSON.parse(localStorage.getItem('7fit-v6-recent') ?? '[]')).toContain('pp17')
+  })
+
+  it('preserves mixed Home search domain order and the global eight-result limit', () => {
+    const query = '核心'
+    const q = query.toLowerCase()
+    const expected = [
+      ...postpartumPresentationBridgeCatalog
+        .filter(({ presentation }) => `${presentation.id} ${presentation.name} ${presentation.category}`.toLowerCase().includes(q))
+        .map(({ presentation }) => ({ id: presentation.id, href: `#/postpartum/${presentation.id}` })),
+      ...templates
+        .filter((item) => `${item.code} ${item.name} ${item.description}`.toLowerCase().includes(q))
+        .map((item) => ({ id: item.id, href: `#/templates/${item.id}/l1` })),
+      ...movementPatterns
+        .filter((item) => `${item.id} ${item.name}`.toLowerCase().includes(q))
+        .map((item) => ({ id: item.id, href: `#/patterns/${item.id}` })),
+    ].slice(0, 8)
+    expect(expected.length).toBeGreaterThan(1)
+
+    window.location.hash = '#/home'
+    render(<App />)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } })
+
+    expect(screen.getAllByRole('option').map((result) => result.getAttribute('href'))).toEqual(expected.map((item) => item.href))
+  })
+
+  it('renders Home common postpartum actions from the bridge catalog in the frozen first-four order', () => {
+    window.location.hash = '#/home'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '常用动作' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing common-actions section')
+    const expected = postpartumPresentationBridgeCatalog.slice(0, 4).map(({ presentation }) => presentation)
+    const cards = Array.from(section.querySelectorAll<HTMLAnchorElement>('.action-card'))
+
+    expect(cards).toHaveLength(expected.length)
+    expect(cards.map((card) => card.getAttribute('href'))).toEqual(expected.map((item) => `#/postpartum/${item.id}`))
+    expect(cards.map((card) => card.querySelector('.action-card-top > span')?.textContent?.toLowerCase())).toEqual(expected.map((item) => item.id))
+  })
+
+  it('keeps App Home collection consumers on the frozen bridge catalog boundary', () => {
+    expect(appSource).toContain('postpartumPresentationBridgeCatalog')
+    expect(appSource).not.toMatch(/\bpostpartumMovements\b/)
   })
 
   it('renders PP details as text content with an inline video and no coach-card image', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, Check, ChevronRight, Copy, ExternalLink, Heart, Moon, Search, ShieldAlert, Sun } from 'lucide-react'
-import { getLibraryAction, getLibraryActionId, getPattern, getPostpartumMovement, getTemplate, librarySections, movementPatterns, postpartumMovements, templates, type ActionEntity, type Level, type Template } from './data/content'
+import { getLibraryAction, getLibraryActionId, getPattern, getPostpartumMovement, getTemplate, librarySections, movementPatterns, templates, type ActionEntity, type Level, type Template } from './data/content'
 import { resolveFemaleProgrammingTemplates } from './data/pp'
 import { getPostpartumPresentationBridgeRecord, postpartumPresentationBridgeCatalog } from './data/postpartumPresentationBridge'
 import { getRoute, navigate, type Route } from './lib/router'
@@ -90,7 +90,7 @@ const HomePage = () => {
     const q = query.trim().toLowerCase()
     if (!q) return []
     return [
-      ...postpartumMovements.filter((item) => `${item.id} ${item.name} ${item.category}`.toLowerCase().includes(q)).map((item) => ({ id: item.id, title: `${item.id.toUpperCase()} · ${item.name}`, meta: `产后专项 · ${item.category}`, href: `#/postpartum/${item.id}` })),
+      ...postpartumPresentationBridgeCatalog.filter(({ presentation }) => `${presentation.id} ${presentation.name} ${presentation.category}`.toLowerCase().includes(q)).map(({ presentation }) => ({ id: presentation.id, title: `${presentation.id.toUpperCase()} · ${presentation.name}`, meta: `产后专项 · ${presentation.category}`, href: `#/postpartum/${presentation.id}` })),
       ...templates.filter((item) => `${item.code} ${item.name} ${item.description}`.toLowerCase().includes(q)).map((item) => ({ id: item.id, title: item.name, meta: `${item.code} · ${systemLabel[item.system]}`, href: `#/templates/${item.id}/l1` })),
       ...movementPatterns.filter((item) => `${item.id} ${item.name}`.toLowerCase().includes(q)).map((item) => ({ id: item.id, title: item.name, meta: 'Movement Pattern', href: `#/patterns/${item.id}` })),
     ].slice(0, 8)
@@ -105,7 +105,7 @@ const HomePage = () => {
     <section className="search-section" aria-label="动作与训练搜索"><SearchBox value={query} onChange={setQuery} />{query && <div className="search-results" role="listbox">{results.length ? results.map((result) => <a href={result.href} key={result.id} role="option" onClick={() => addRecent(result.id)}><span>{result.title}</span><small>{result.meta}</small><ChevronRight size={16} /></a>) : <p className="empty-state">没有找到匹配内容，试试“臀桥”“3C”或“核心”。</p>}</div>}</section>
     <section className="section-block"><SectionHeading title="快速进入" action={<a href="#/templates">查看全部 <ArrowRight size={15} /></a>} /><div className="quick-grid"><a className="quick-card purple" href="#/templates"><span>01</span><b>训练模板</b><small>3C · BODY · 体能</small></a><a className="quick-card peach" href="#/library/postpartum"><span>02</span><b>产后专项</b><small>PP01–PP26 · L0–L4</small></a><a className="quick-card mint" href="#/library/cardio"><span>03</span><b>课后有氧</b><small>恢复与心肺</small></a></div></section>
     <section className="section-block"><SectionHeading title="最近使用" action={recent.length ? <button className="text-button" onClick={() => { localStorage.removeItem('7fit-v6-recent'); setRecent([]) }}>清除</button> : undefined} />{recentItems.length ? <div className="compact-list">{recentItems.map((item) => <a href={item.id.startsWith('pp') ? `#/postpartum/${item.id}` : `#/templates/${item.id}/l1`} key={item.id}><span className="list-icon"><Bookmark size={16} /></span><span><b>{item.name}</b><small>{'category' in item ? item.category : systemLabel[item.system]}</small></span><ChevronRight size={16} /></a>)}</div> : <div className="empty-card"><span className="empty-icon"><Bookmark size={20} /></span><div><b>还没有最近使用</b><p>打开一个模板或动作，之后会自动出现在这里。</p></div></div>}</section>
-    <section className="section-block"><SectionHeading title="常用动作" action={<a href="#/library">打开动作库 <ArrowRight size={15} /></a>} /><div className="action-grid">{postpartumMovements.slice(0, 4).map((item) => <ActionCard key={item.id} item={item} favorites={favorites} onFavorite={(id) => setFavorites(toggleFavorite(id))} />)}</div></section>
+    <section className="section-block"><SectionHeading title="常用动作" action={<a href="#/library">打开动作库 <ArrowRight size={15} /></a>} /><div className="action-grid">{postpartumPresentationBridgeCatalog.slice(0, 4).map(({ presentation }) => <ActionCard key={presentation.id} item={presentation} favorites={favorites} onFavorite={(id) => setFavorites(toggleFavorite(id))} />)}</div></section>
     {favItems.length > 0 && <section className="section-block"><SectionHeading title="我的收藏" /><div className="action-grid">{favItems.slice(0, 4).map((item) => <ActionCard key={item.id} item={item} favorites={favorites} onFavorite={(id) => setFavorites(toggleFavorite(id))} />)}</div></section>}
     <section className="rule-note"><div className="rule-mark">i</div><div><b>L1–L4 是方案等级，不是动作技术等级</b><p>高等级会员仍可选用技术 L1–L3 的稳定动作，始终以当前目标、控制质量和安全信号为先。</p></div></section>
   </div>
