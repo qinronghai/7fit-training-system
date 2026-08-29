@@ -1,6 +1,6 @@
-import { postpartumMovements } from './content'
+import { postpartumMovements } from './postpartumPresentationData'
 import { ppMethodNodeById, ppMethodNodes } from './pp/methodNodes'
-import type { ActionEntity } from './content'
+import type { ActionEntity } from './postpartumPresentationData'
 import type { PPMethodNode } from './pp/types'
 
 export type PPPostpartumPresentationRecord = {
@@ -23,6 +23,7 @@ export type PPPostpartumPresentationBridgeIssueCode =
   | 'SOURCE_ID_MISMATCH'
   | 'SOURCE_NAME_MISMATCH'
   | 'SOURCE_ORIGIN_MISMATCH'
+  | 'UNSUPPORTED_SOURCE_MAPPING_STATUS'
   | 'INVALID_SOURCE_NODE_IDENTITY'
   | 'EXPANSION_NODE_PRESENT'
   | 'INVALID_ROOT_SHAPE'
@@ -35,6 +36,7 @@ export type PPPostpartumPresentationBridgeIssue = {
 }
 
 const EXPECTED_PRESENTATION_COUNT = 26
+const supportedSourceMappingStatuses = new Set(['mapped', 'variant', 'method-only'])
 const expectedPresentationIds = new Set(
   Array.from({ length: EXPECTED_PRESENTATION_COUNT }, (_, index) => `pp${String(index + 1).padStart(2, '0')}`),
 )
@@ -131,6 +133,14 @@ const validateSourceCatalog = (sources: PPPostpartumPresentationBridgeSources): 
         ))
       }
       methodSourceIds.add(methodNode.source.sourceId)
+
+      if (!supportedSourceMappingStatuses.has(methodNode.mapping.status)) {
+        issues.push(createIssue(
+          'UNSUPPORTED_SOURCE_MAPPING_STATUS',
+          `unsupported source mapping status: ${methodNode.mapping.status}: ${methodNode.id}`,
+          { methodNodeId: methodNode.id },
+        ))
+      }
 
       const presentation = presentationById.get(methodNode.id)
       if (presentation && methodNode.source.sourceId !== presentation.id.toUpperCase()) {
@@ -261,6 +271,14 @@ const validateBridgeCatalog = (records: readonly Partial<PPPostpartumPresentatio
       ))
     }
 
+    if (methodNode.source?.origin === 'postpartum-course' && !supportedSourceMappingStatuses.has(methodNode.mapping.status)) {
+      issues.push(createIssue(
+        'UNSUPPORTED_SOURCE_MAPPING_STATUS',
+        `unsupported source mapping status: ${methodNode.mapping.status}: ${methodNode.id}`,
+        { presentationId: presentation.id, methodNodeId: methodNode.id },
+      ))
+    }
+
     if (methodNode.source?.sourceId !== presentation.id.toUpperCase()) {
       issues.push(createIssue(
         'SOURCE_ID_MISMATCH',
@@ -314,24 +332,24 @@ export const buildPostpartumPresentationBridgeCatalog = (
   const sourceMethodNodes = sources.methodNodes.filter((methodNode) => methodNode.source?.origin === 'postpartum-course')
   const methodNodeById = new Map(sourceMethodNodes.map((methodNode) => [methodNode.id, methodNode] as const))
 
-  return sources.presentations.map((presentation) => {
+  return Object.freeze(sources.presentations.map((presentation) => {
     const methodNode = methodNodeById.get(presentation.id)
     if (!methodNode) {
       throw new Error(`Missing method node for postpartum presentation: ${presentation.id}`)
     }
-    return {
+    return Object.freeze({
       presentation,
       methodNode,
-    }
-  })
+    })
+  }))
 }
 
 export const postpartumPresentationBridgeCatalog = buildPostpartumPresentationBridgeCatalog()
 
-export const postpartumPresentationBridgeById = new Map(
+const postpartumPresentationRecordById = new Map(
   postpartumPresentationBridgeCatalog.map((record) => [record.presentation.id, record] as const),
 )
 
 export const getPostpartumPresentationBridgeRecord = (
   id: string,
-): PPPostpartumPresentationRecord | undefined => postpartumPresentationBridgeById.get(id)
+): PPPostpartumPresentationRecord | undefined => postpartumPresentationRecordById.get(id)

@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { postpartumMovements } from '../src/data/content'
+import bridgeSource from '../src/data/postpartumPresentationBridge.ts?raw'
+import leafSource from '../src/data/postpartumPresentationData.ts?raw'
+import {
+  allRoutes,
+  getPostpartumMovement as getContentPostpartumMovement,
+  movementPatterns,
+  postpartumMovements,
+} from '../src/data/content'
+import {
+  getPostpartumMovement as getLeafPostpartumMovement,
+  postpartumMovements as leafPostpartumMovements,
+} from '../src/data/postpartumPresentationData'
 import { ppMethodNodeById, ppMethodNodes } from '../src/data/pp/methodNodes'
 import type { PPMethodNode } from '../src/data/pp/types'
 import {
@@ -26,7 +37,7 @@ describe('PP-G1B2B postpartum presentation bridge', () => {
     const presentationIds = postpartumPresentationBridgeCatalog.map((record) => record.presentation.id)
     const methodIds = postpartumPresentationBridgeCatalog.map((record) => record.methodNode.id)
 
-    expect(presentationIds).toEqual(ppMethodNodes.filter((node) => node.source).map((node) => node.id))
+    expect(presentationIds).toEqual(ppMethodNodes.filter((node) => node.source?.origin === 'postpartum-course').map((node) => node.id))
     expect(methodIds).toEqual(presentationIds)
     expect(presentationIds.every((id) => !id.startsWith('exp-'))).toBe(true)
 
@@ -119,6 +130,58 @@ describe('PP-G1B2B postpartum presentation bridge', () => {
     expect(getPostpartumPresentationBridgeRecord('pp01')).toBe(postpartumPresentationBridgeCatalog[0])
     expect(getPostpartumPresentationBridgeRecord('pp26')).toBe(postpartumPresentationBridgeCatalog.at(-1))
     expect(getPostpartumPresentationBridgeRecord('missing-id')).toBeUndefined()
+    expect(Object.isFrozen(postpartumPresentationBridgeCatalog)).toBe(true)
+    expect(Object.isFrozen(postpartumPresentationBridgeCatalog[0])).toBe(true)
+  })
+
+  it('keeps the content compatibility exports reference-identical to the pure Presentation leaf', () => {
+    expect(postpartumMovements).toBe(leafPostpartumMovements)
+    expect(getContentPostpartumMovement).toBe(getLeafPostpartumMovement)
+    expect(getContentPostpartumMovement('pp01')).toBe(getLeafPostpartumMovement('pp01'))
+    expect(postpartumMovements).toHaveLength(26)
+    expect(movementPatterns.flatMap((pattern) => pattern.postpartumIds)).toHaveLength(34)
+    expect(allRoutes).toHaveLength(66)
+  })
+
+  it('selects only original postpartum-course nodes by origin and excludes all expansion nodes', () => {
+    const selectedSourceNodes = ppMethodNodes.filter((node) => node.source?.origin === 'postpartum-course')
+    const expansionNodes = ppMethodNodes.filter((node) => node.id.startsWith('exp-'))
+
+    expect(selectedSourceNodes).toHaveLength(26)
+    expect(expansionNodes).toHaveLength(27)
+    expect(selectedSourceNodes.some((node) => node.id.startsWith('exp-'))).toBe(false)
+    expect(postpartumPresentationBridgeCatalog.some((record) => record.presentation.id.startsWith('exp-'))).toBe(false)
+    expect(postpartumPresentationBridgeCatalog.some((record) => record.methodNode.id.startsWith('exp-'))).toBe(false)
+  })
+
+  it('keeps the bridge and Presentation data leaf within their import boundaries', () => {
+    expect(bridgeSource).not.toMatch(/from ['"]\.\/content['"]|from ['"]\.\/exercises(?:['"]|\/)|from ['"]\.\/programming(?:['"]|\/)/)
+    expect(bridgeSource).not.toMatch(/from ['"]\.\/pp\/(?!methodNodes['"]|types['"])/)
+    expect(bridgeSource).not.toMatch(/from ['"][^'"]*(?:femaleProgrammingPolicy|femaleProgrammingRules|femaleProgrammingTemplates|femaleProgrammingRuntime|App|router|storage|template-copy)/)
+    expect(leafSource).not.toMatch(/^\s*import\s/m)
+    expect(leafSource).not.toMatch(/from ['"][^'"]*(?:programming|exercises|pp\/|App|router|storage|template-copy)/)
+  })
+
+  it.each([
+    ['add-candidate', { status: 'add-candidate', proposedExerciseId: 'synthetic-candidate' }],
+    ['verify', { status: 'verify', reason: 'synthetic verification case' }],
+  ] as const)('rejects unsupported source mapping status %s', (_label, mapping) => {
+    const malformedMethodNodes = ppMethodNodes.map((methodNode) => (
+      methodNode.id === 'pp01'
+        ? cloneMethodNode(methodNode, { mapping })
+        : methodNode
+    ))
+
+    expect(() => buildPostpartumPresentationBridgeCatalog({
+      presentations: postpartumMovements,
+      methodNodes: malformedMethodNodes,
+    })).toThrow(/unsupported source mapping status/)
+
+    const issues = validatePostpartumPresentationBridge([{
+      presentation: postpartumMovements[0],
+      methodNode: cloneMethodNode(ppMethodNodeById.get('pp01')!, { mapping }),
+    }])
+    expect(issues.some((issue) => issue.code === 'UNSUPPORTED_SOURCE_MAPPING_STATUS')).toBe(true)
   })
 
   it('fails closed when the source catalogs are malformed', () => {
