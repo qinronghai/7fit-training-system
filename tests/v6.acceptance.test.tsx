@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import {
   allRoutes,
   getLibraryAction,
@@ -13,11 +13,21 @@ import {
 import { getRoute } from '../src/lib/router'
 import { buildTemplateCopyText } from '../src/lib/template-copy'
 import { App } from '../src/App'
+import { resolveFemaleProgrammingTemplates } from '../src/data/pp'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
 import { exerciseDisplayCategoryLabels, getExercise, resolveProgrammingExerciseId } from '../src/data/exercises'
 import { resolveProgrammingLevel } from '../src/data/programming/rules'
+
+const femaleRuntimeTemplates = resolveFemaleProgrammingTemplates()
+
+const getSlotCard = (slot: 'HIP' | 'SUPPORT' | 'CORE') => {
+  const heading = screen.getByRole('heading', { level: 2, name: slot })
+  const card = heading.closest('.info-card')
+  if (!(card instanceof HTMLElement)) throw new Error(`Missing slot card for ${slot}`)
+  return within(card)
+}
 
 describe('7Fit V6 content contract', () => {
   it('keeps the 66 migrated route pages addressable', () => {
@@ -215,9 +225,13 @@ describe('7Fit V6 routing and shell', () => {
 
   it('parses hash deep links and unknown paths safely', () => {
     expect(getRoute('#/templates/3c1/l1')).toEqual({ name: 'template-detail', system: '3c1', level: 'l1' })
+    expect(getRoute('#/female/fit-f01')).toEqual({ name: 'female-template-detail', id: 'fit-f01' })
+    expect(getRoute('#/female/fit-f01/l1')).toEqual({ name: 'female-template-detail', id: 'fit-f01' })
     expect(getRoute('#/postpartum/pp01')).toEqual({ name: 'postpartum-detail', id: 'pp01' })
     expect(getRoute('#/library/action/action-001')).toEqual({ name: 'action-detail', id: 'action-001' })
     expect(getRoute('#/unknown')).toEqual({ name: 'home' })
+    const femaleRoute = getRoute('#/female/fit-f01')
+    expect('level' in femaleRoute).toBe(false)
   })
 
   it('renders a migrated template action as a library detail link', () => {
@@ -241,5 +255,122 @@ describe('7Fit V6 routing and shell', () => {
     expect(screen.getByText('教练卡内容（文字版）')).toBeInTheDocument()
     expect(screen.getByTitle('PP01 主视频')).toBeInTheDocument()
     expect(document.querySelector('.pp-detail-page img')).toBeNull()
+  })
+
+  it('renders a separate female runtime section on the templates page with eight dedicated links', () => {
+    window.location.hash = '#/templates'
+    render(<App />)
+
+    const femaleHeading = screen.getByRole('heading', { level: 2, name: '女性 1+1+1' })
+    const femaleSection = femaleHeading.closest('.section-block')
+    if (!(femaleSection instanceof HTMLElement)) throw new Error('Missing female runtime section')
+
+    expect(within(femaleSection).getByText('8 个模板')).toBeInTheDocument()
+    expect(within(femaleSection).queryByText('4 个方案等级')).toBeNull()
+
+    const expectedLinks = femaleRuntimeTemplates.map(({ template }) => `#/female/${template.id}`)
+    const actualLinks = Array.from(femaleSection.querySelectorAll<HTMLAnchorElement>('a.template-card'))
+      .map((link) => link.getAttribute('href'))
+
+    expect(actualLinks).toEqual(expectedLinks)
+    expect(actualLinks.every((href) => typeof href === 'string' && !/\/l[1-4]$/.test(href))).toBe(true)
+
+    for (const { template } of femaleRuntimeTemplates) {
+      expect(within(femaleSection).getByText(template.code)).toBeInTheDocument()
+    }
+  })
+
+  it('renders female detail with exactly HIP SUPPORT CORE and keeps Templates nav active', () => {
+    window.location.hash = '#/female/fit-f01'
+    render(<App />)
+
+    expect(screen.getByRole('heading', { level: 2, name: 'HIP' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'SUPPORT' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'CORE' })).toBeInTheDocument()
+    expect(screen.queryByText('BREATH')).toBeNull()
+    expect(screen.queryByRole('tablist', { name: '方案等级' })).toBeNull()
+    expect(screen.getAllByText('PRIMARY_CHALLENGE')).toHaveLength(1)
+    expect(screen.getAllByText('SUPPORTING')).toHaveLength(2)
+
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    expect(within(nav).getByRole('link', { name: '模板' })).toHaveClass('active')
+  })
+
+  it('shows mapped canonical semantics without a variant id for FIT-F04 HIP', () => {
+    const mappedHip = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f04')!.slots.HIP
+
+    window.location.hash = '#/female/fit-f04'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    expect(hipCard.getByText(mappedHip.methodNode.id)).toBeInTheDocument()
+    expect(hipCard.getByText(mappedHip.canonical.exercise.id)).toBeInTheDocument()
+    expect(hipCard.getByText(mappedHip.canonical.exercise.name)).toBeInTheDocument()
+    expect(hipCard.getByText(mappedHip.canonical.mapping.status)).toBeInTheDocument()
+    expect(hipCard.queryByText('pp01-hip-dominant-squat')).toBeNull()
+  })
+
+  it('shows variant canonical semantics for FIT-F05 HIP', () => {
+    const variantHip = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f05')!.slots.HIP
+    if (variantHip.canonical.mapping.status !== 'variant') throw new Error('Expected FIT-F05 HIP to resolve as a variant mapping')
+
+    window.location.hash = '#/female/fit-f05'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    expect(hipCard.getByText(variantHip.canonical.exercise.id)).toBeInTheDocument()
+    expect(hipCard.getByText(variantHip.canonical.exercise.name)).toBeInTheDocument()
+    expect(hipCard.getByText(variantHip.canonical.mapping.status)).toBeInTheDocument()
+    expect(hipCard.getByText(variantHip.canonical.mapping.variantId)).toBeInTheDocument()
+  })
+
+  it('shows conditional readiness as read-only runtime state for FIT-F07', () => {
+    const fitF07 = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f07')!
+
+    window.location.hash = '#/female/fit-f07'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    const supportCard = getSlotCard('SUPPORT')
+    const coreCard = getSlotCard('CORE')
+
+    expect(fitF07.slots.HIP.requiresConditionalReadiness).toBe(true)
+    expect(fitF07.slots.SUPPORT.requiresConditionalReadiness).toBe(true)
+    expect(fitF07.slots.CORE.requiresConditionalReadiness).toBe(false)
+
+    expect(hipCard.getByText('需要条件就绪')).toBeInTheDocument()
+    expect(supportCard.getByText('需要条件就绪')).toBeInTheDocument()
+    expect(coreCard.getByText('无需额外条件就绪')).toBeInTheDocument()
+    expect(screen.queryByText('已就绪')).toBeNull()
+    expect(screen.queryByText('未就绪')).toBeNull()
+  })
+
+  it('shows method and policy metadata from the resolved runtime for FIT-F04 HIP', () => {
+    const fitF04Hip = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f04')!.slots.HIP
+
+    window.location.hash = '#/female/fit-f04'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.mode)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.pressureIntent)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.inhale!)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.exhale!)).toBeInTheDocument()
+    for (const criterion of fitF04Hip.methodNode.qualityGate.criteria) {
+      expect(hipCard.getByText(criterion.requirement)).toBeInTheDocument()
+    }
+    for (const compensation of fitF04Hip.methodNode.commonCompensations) {
+      expect(hipCard.getByText(compensation)).toBeInTheDocument()
+    }
+    expect(hipCard.getByText(fitF04Hip.policy.eligibility)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.policy.demand)).toBeInTheDocument()
+  })
+
+  it('uses the existing safe empty route for unknown female template ids', () => {
+    window.location.hash = '#/female/does-not-exist'
+    render(<App />)
+
+    expect(screen.getByRole('heading', { level: 1, name: '模板不存在' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '返回' })).toHaveAttribute('href', '#/templates')
   })
 })

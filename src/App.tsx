@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, Check, ChevronRight, Copy, ExternalLink, Heart, Moon, Search, ShieldAlert, Sun } from 'lucide-react'
 import { getLibraryAction, getLibraryActionId, getPattern, getPostpartumMovement, getTemplate, librarySections, movementPatterns, postpartumMovements, templates, type ActionEntity, type Level, type Template } from './data/content'
+import { resolveFemaleProgrammingTemplates } from './data/pp'
 import { getRoute, navigate, type Route } from './lib/router'
 import { addRecent, getFavorites, getRecent, toggleFavorite } from './lib/storage'
 import { ThemeProvider, useTheme } from './lib/theme'
@@ -8,6 +9,10 @@ import { buildTemplateCopyText } from './lib/template-copy'
 
 const systemLabel: Record<Template['system'], string> = { '3c': '3C 代谢力量', body: 'BODY 塑形', conditioning: 'CONDITIONING 体能' }
 const levelLabel: Record<Level, string> = { l0: 'L0', l1: 'L1', l2: 'L2', l3: 'L3', l4: 'L4' }
+const femaleRuntimeTemplates = resolveFemaleProgrammingTemplates()
+const femaleTemplateSlots = ['HIP', 'SUPPORT', 'CORE'] as const
+type FemaleRuntimeTemplate = (typeof femaleRuntimeTemplates)[number]
+type FemaleRuntimeSlot = FemaleRuntimeTemplate['slots'][keyof FemaleRuntimeTemplate['slots']]
 
 export const App = () => <ThemeProvider><AppContent /></ThemeProvider>
 
@@ -49,7 +54,10 @@ const BottomNav = ({ route }: { route: Route }) => {
     ['home', '首页', '#/home'], ['templates', '模板', '#/templates'], ['patterns', '模式', '#/patterns'], ['library', '动作库', '#/library'],
   ] as const
   return <nav className="bottom-nav" aria-label="主导航">
-    {items.map(([name, label, href]) => <a className={route.name.startsWith(name) ? 'active' : ''} href={href} key={name}>{label}</a>)}
+    {items.map(([name, label, href]) => {
+      const active = route.name.startsWith(name) || (name === 'templates' && route.name === 'female-template-detail')
+      return <a className={active ? 'active' : ''} href={href} key={name}>{label}</a>
+    })}
   </nav>
 }
 
@@ -58,6 +66,7 @@ const RouteView = ({ route }: { route: Route }) => {
     case 'home': return <HomePage />
     case 'templates': return <TemplatesPage />
     case 'template-detail': return <TemplateDetailPage id={route.system} level={route.level} />
+    case 'female-template-detail': return <FemaleTemplateDetailPage id={route.id} />
     case 'patterns': return <PatternsPage />
     case 'pattern-detail': return <PatternDetailPage id={route.id} />
     case 'library': return <LibraryPage />
@@ -107,10 +116,11 @@ const TemplatesPage = () => {
   const [query, setQuery] = useState('')
   const [system, setSystem] = useState<'all' | Template['system']>('all')
   const filtered = templates.filter((template) => (system === 'all' || template.system === system) && `${template.code} ${template.name} ${template.description}`.toLowerCase().includes(query.toLowerCase()))
-  return <div className="page"><PageTitle eyebrow="TRAINING TEMPLATES" title="训练模板" description="先选训练体系，再选模板与 L1–L4 方案等级。三大体系同级，不互相附加。" /><SearchBox value={query} onChange={setQuery} placeholder="搜索模板名称或目标" /><div className="filter-row"><Pill active={system === 'all'} onClick={() => setSystem('all')}>全部 · 16</Pill><Pill active={system === '3c'} onClick={() => setSystem('3c')}>3C · 6</Pill><Pill active={system === 'body'} onClick={() => setSystem('body')}>BODY · 5</Pill><Pill active={system === 'conditioning'} onClick={() => setSystem('conditioning')}>体能 · 5</Pill></div><div className="template-grid">{filtered.map((template) => <TemplateCard key={template.id} template={template} />)}</div></div>
+  return <div className="page"><PageTitle eyebrow="TRAINING TEMPLATES" title="训练模板" description="先选训练体系，再选模板与 L1–L4 方案等级。三大体系同级，不互相附加。" /><SearchBox value={query} onChange={setQuery} placeholder="搜索模板名称或目标" /><div className="filter-row"><Pill active={system === 'all'} onClick={() => setSystem('all')}>全部 · 16</Pill><Pill active={system === '3c'} onClick={() => setSystem('3c')}>3C · 6</Pill><Pill active={system === 'body'} onClick={() => setSystem('body')}>BODY · 5</Pill><Pill active={system === 'conditioning'} onClick={() => setSystem('conditioning')}>体能 · 5</Pill></div><div className="template-grid">{filtered.map((template) => <TemplateCard key={template.id} template={template} />)}</div><section className="section-block"><SectionHeading title="女性 1+1+1" action={<span className="muted">8 个模板</span>} /><div className="template-grid">{femaleRuntimeTemplates.map((template) => <FemaleTemplateCard key={template.template.id} template={template} />)}</div></section></div>
 }
 
 const TemplateCard = ({ template }: { template: Template }) => <a className="template-card" href={`#/templates/${template.id}/l1`}><div className={`template-badge ${template.system}`}>{template.code}</div><h3>{template.name}</h3><p>{template.description}</p><div className="card-footer"><span>4 个方案等级</span><ChevronRight size={17} /></div></a>
+const FemaleTemplateCard = ({ template }: { template: FemaleRuntimeTemplate }) => <a className="template-card" href={`#/female/${template.template.id}`}><div className="template-badge body">{template.template.code}</div><h3>{template.template.name}</h3><p>{template.template.intent}</p><div className="card-footer"><span>HIP · SUPPORT · CORE</span><ChevronRight size={17} /></div></a>
 
 const TemplateDetailPage = ({ id, level }: { id: string; level: 'l1' | 'l2' | 'l3' | 'l4' }) => {
   const template = getTemplate(id)
@@ -138,6 +148,57 @@ const TemplateDetailPage = ({ id, level }: { id: string; level: 'l1' | 'l2' | 'l
     <section className="metrics-row">{current.metrics.slice(0, 3).map((metric) => <div key={metric.label}><small>{metric.label}</small><b>{metric.value}</b></div>)}</section>{current.coachNote && <details className="template-coach-note"><summary>教练提示</summary><p>{current.coachNote}</p></details>}
   </div>
 }
+
+const FemaleTemplateDetailPage = ({ id }: { id: string }) => {
+  const template = femaleRuntimeTemplates.find((item) => item.template.id === id)
+  if (!template) return <EmptyRoute title="模板不存在" href="#/templates" />
+
+  return <div className="page detail-page">
+    <div className="sticky-context"><a href="#/templates"><ArrowLeft size={16} /> 模板</a><span>{template.template.code}</span><span /></div>
+    <div className="detail-title">
+      <Eyebrow>FEMALE 1+1+1 · {template.template.code}</Eyebrow>
+      <h1>{template.template.name}</h1>
+      <p>{template.template.intent}</p>
+      <div className="tag-row">
+        <Pill>HIP</Pill>
+        <Pill>SUPPORT</Pill>
+        <Pill>CORE</Pill>
+      </div>
+    </div>
+    {template.template.coachNote && <details className="template-coach-note"><summary>教练提示</summary><p>{template.template.coachNote}</p></details>}
+    <section className="workout-section">
+      <SectionHeading title="1+1+1 Slots" action={<span className="muted">3 个槽位</span>} />
+      <div className="detail-columns">
+        {femaleTemplateSlots.map((slotName) => <FemaleSlotCard key={slotName} slot={template.slots[slotName]} />)}
+      </div>
+    </section>
+  </div>
+}
+
+const FemaleSlotCard = ({ slot }: { slot: FemaleRuntimeSlot }) => <section className="info-card">
+  <h2>{slot.slot}</h2>
+  <div className="tag-row">
+    <Pill>{slot.challengeRole}</Pill>
+    <Pill>{slot.policy.eligibility}</Pill>
+    <Pill>{slot.policy.demand}</Pill>
+    <Pill>{slot.methodNode.id}</Pill>
+  </div>
+  <p>{slot.canonical.exercise.id}</p>
+  <p>{slot.canonical.exercise.name}</p>
+  <p>{slot.canonical.mapping.status}</p>
+  {'variantId' in slot.canonical.mapping && <p>{slot.canonical.mapping.variantId}</p>}
+  <p>{slot.requiresConditionalReadiness ? '需要条件就绪' : '无需额外条件就绪'}</p>
+  <p>{slot.methodNode.breathing.mode}</p>
+  <p>{slot.methodNode.breathing.pressureIntent}</p>
+  {slot.methodNode.breathing.inhale && <p>{slot.methodNode.breathing.inhale}</p>}
+  {slot.methodNode.breathing.exhale && <p>{slot.methodNode.breathing.exhale}</p>}
+  <div>
+    {slot.methodNode.qualityGate.criteria.map((criterion) => <p key={`${slot.slot}-${criterion.code}`}>{criterion.requirement}</p>)}
+  </div>
+  <div>
+    {slot.methodNode.commonCompensations.map((item) => <p key={`${slot.slot}-${item}`}>{item}</p>)}
+  </div>
+</section>
 
 const PatternsPage = () => <div className="page"><PageTitle eyebrow="MOVEMENT PATTERNS" title="动作模式" description="12 大 Movement Pattern 连接普通训练与产后专项动作。" /><div className="pattern-grid">{movementPatterns.map((pattern, index) => <a className="pattern-card" href={`#/patterns/${pattern.id}`} key={pattern.id}><span className="pattern-index">{String(index + 1).padStart(2, '0')}</span><h3>{pattern.name}</h3><p>{pattern.englishName}</p><span className="cross-count">{pattern.postpartumIds.length} 个 PP 交叉 <ChevronRight size={15} /></span></a>)}</div></div>
 
