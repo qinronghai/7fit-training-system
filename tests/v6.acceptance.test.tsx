@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import {
   allRoutes,
   getLibraryAction,
@@ -13,11 +13,26 @@ import {
 import { getRoute } from '../src/lib/router'
 import { buildTemplateCopyText } from '../src/lib/template-copy'
 import { App } from '../src/App'
+import appSource from '../src/App.tsx?raw'
+import { resolveFemaleProgrammingTemplates } from '../src/data/pp'
+import { getPostpartumPresentationBridgeRecord, postpartumPresentationBridgeCatalog } from '../src/data/postpartumPresentationBridge'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
 import { exerciseDisplayCategoryLabels, getExercise, resolveProgrammingExerciseId } from '../src/data/exercises'
 import { resolveProgrammingLevel } from '../src/data/programming/rules'
+
+const femaleRuntimeTemplates = resolveFemaleProgrammingTemplates()
+
+const getSlotCard = (slot: 'HIP' | 'SUPPORT' | 'CORE') => {
+  const heading = screen.getByRole('heading', { level: 2, name: slot })
+  const card = heading.closest('.info-card')
+  if (!(card instanceof HTMLElement)) throw new Error(`Missing slot card for ${slot}`)
+  return within(card)
+}
+
+const getRenderedPostpartumIds = () => Array.from(document.querySelectorAll<HTMLAnchorElement>('.pp-card'))
+  .map((card) => card.querySelector('.card-meta span')?.textContent?.toLowerCase())
 
 describe('7Fit V6 content contract', () => {
   it('keeps the 66 migrated route pages addressable', () => {
@@ -215,9 +230,13 @@ describe('7Fit V6 routing and shell', () => {
 
   it('parses hash deep links and unknown paths safely', () => {
     expect(getRoute('#/templates/3c1/l1')).toEqual({ name: 'template-detail', system: '3c1', level: 'l1' })
+    expect(getRoute('#/female/fit-f01')).toEqual({ name: 'female-template-detail', id: 'fit-f01' })
+    expect(getRoute('#/female/fit-f01/l1')).toEqual({ name: 'female-template-detail', id: 'fit-f01' })
     expect(getRoute('#/postpartum/pp01')).toEqual({ name: 'postpartum-detail', id: 'pp01' })
     expect(getRoute('#/library/action/action-001')).toEqual({ name: 'action-detail', id: 'action-001' })
     expect(getRoute('#/unknown')).toEqual({ name: 'home' })
+    const femaleRoute = getRoute('#/female/fit-f01')
+    expect('level' in femaleRoute).toBe(false)
   })
 
   it('renders a migrated template action as a library detail link', () => {
@@ -235,11 +254,356 @@ describe('7Fit V6 routing and shell', () => {
     expect(screen.getByText('教练工作台')).toBeInTheDocument()
   })
 
+  it('keeps Home PP search backed by bridge Presentation data and preserves recent behavior', () => {
+    const record = postpartumPresentationBridgeCatalog.find((item) => item.presentation.id === 'pp17')!
+    window.location.hash = '#/home'
+    render(<App />)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'PP17' } })
+    const result = screen.getByRole('option')
+    expect(result).toHaveTextContent(`PP17 · ${record.presentation.name}`)
+    expect(result).toHaveTextContent(`产后专项 · ${record.presentation.category}`)
+    expect(result).toHaveAttribute('href', '#/postpartum/pp17')
+
+    fireEvent.click(result)
+    expect(JSON.parse(localStorage.getItem('7fit-v6-recent') ?? '[]')).toContain('pp17')
+  })
+
+  it('preserves mixed Home search domain order and the global eight-result limit', () => {
+    const query = '核心'
+    const q = query.toLowerCase()
+    const expected = [
+      ...postpartumPresentationBridgeCatalog
+        .filter(({ presentation }) => `${presentation.id} ${presentation.name} ${presentation.category}`.toLowerCase().includes(q))
+        .map(({ presentation }) => ({ id: presentation.id, href: `#/postpartum/${presentation.id}` })),
+      ...templates
+        .filter((item) => `${item.code} ${item.name} ${item.description}`.toLowerCase().includes(q))
+        .map((item) => ({ id: item.id, href: `#/templates/${item.id}/l1` })),
+      ...movementPatterns
+        .filter((item) => `${item.id} ${item.name}`.toLowerCase().includes(q))
+        .map((item) => ({ id: item.id, href: `#/patterns/${item.id}` })),
+    ].slice(0, 8)
+    expect(expected.length).toBeGreaterThan(1)
+
+    window.location.hash = '#/home'
+    render(<App />)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } })
+
+    expect(screen.getAllByRole('option').map((result) => result.getAttribute('href'))).toEqual(expected.map((item) => item.href))
+  })
+
+  it('renders Home common postpartum actions from the bridge catalog in the frozen first-four order', () => {
+    window.location.hash = '#/home'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '常用动作' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing common-actions section')
+    const expected = postpartumPresentationBridgeCatalog.slice(0, 4).map(({ presentation }) => presentation)
+    const cards = Array.from(section.querySelectorAll<HTMLAnchorElement>('.action-card'))
+
+    expect(cards).toHaveLength(expected.length)
+    expect(cards.map((card) => card.getAttribute('href'))).toEqual(expected.map((item) => `#/postpartum/${item.id}`))
+    expect(cards.map((card) => card.querySelector('.action-card-top > span')?.textContent?.toLowerCase())).toEqual(expected.map((item) => item.id))
+  })
+
+  it('keeps App Home collection consumers on the frozen bridge catalog boundary', () => {
+    expect(appSource).toContain('postpartumPresentationBridgeCatalog')
+    expect(appSource).not.toMatch(/\bpostpartumMovements\b/)
+  })
+
+  it('resolves Home recent PP ids through the bridge while preserving template fallback and order', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp17')!
+    const template = templates.find((item) => item.id === '3c1')!
+    localStorage.setItem('7fit-v6-recent', JSON.stringify(['pp17', '3c1', 'unknown']))
+    window.location.hash = '#/home'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '最近使用' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing recent section')
+    const links = Array.from(section.querySelectorAll<HTMLAnchorElement>('.compact-list > a'))
+
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['#/postpartum/pp17', '#/templates/3c1/l1'])
+    expect(links.map((link) => link.querySelector('b')?.textContent)).toEqual([record.presentation.name, template.name])
+  })
+
+  it('resolves Home favorites through the bridge and preserves favorite control behavior', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp17')!
+    localStorage.setItem('7fit-v6-favorites', JSON.stringify(['pp17', 'unknown']))
+    window.location.hash = '#/home'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '我的收藏' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing favorites section')
+    const card = section.querySelector<HTMLAnchorElement>('.action-card')
+    expect(card).toHaveAttribute('href', '#/postpartum/pp17')
+    expect(card).toHaveTextContent(record.presentation.name)
+
+    fireEvent.click(within(section).getByRole('button', { name: '取消收藏' }))
+    expect(JSON.parse(localStorage.getItem('7fit-v6-favorites') ?? '[]')).not.toContain('pp17')
+  })
+
+  it('resolves PatternDetailPage PP links through exact frozen bridge records', () => {
+    const pattern = movementPatterns.find((item) => item.id === 'squat')!
+    const expected = pattern.postpartumIds
+      .map((id) => getPostpartumPresentationBridgeRecord(id)?.presentation)
+      .filter(Boolean) as Array<NonNullable<ReturnType<typeof getPostpartumPresentationBridgeRecord>>['presentation']>
+    window.location.hash = '#/patterns/squat'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '关联 PP 动作' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing pattern PP section')
+    const cards = Array.from(section.querySelectorAll<HTMLAnchorElement>('.action-card'))
+    expect(cards.map((card) => card.getAttribute('href'))).toEqual(expected.map((item) => `#/postpartum/${item.id}`))
+    expect(cards.map((card) => card.querySelector('.action-card-top > span')?.textContent?.toLowerCase())).toEqual(expected.map((item) => item.id))
+  })
+
+  it('preserves the empty PatternDetailPage state for patterns without PP links', () => {
+    window.location.hash = '#/patterns/hpush'
+    render(<App />)
+
+    expect(screen.getByText('当前没有产后交叉动作')).toBeInTheDocument()
+    expect(document.querySelector('.action-card')).toBeNull()
+  })
+
+  it('closes all remaining App PP exact-ID legacy dependencies at the source boundary', () => {
+    expect(appSource).toContain('getPostpartumPresentationBridgeRecord')
+    expect(appSource).not.toMatch(/\bpostpartumMovements\b/)
+    expect(appSource).not.toMatch(/\bgetPostpartumMovement\b/)
+    expect(appSource).not.toMatch(/\bppMethodNodes\b|\bppMethodNodeById\b/)
+  })
+
   it('renders PP details as text content with an inline video and no coach-card image', () => {
     window.location.hash = '#/postpartum/pp01'
     render(<App />)
     expect(screen.getByText('教练卡内容（文字版）')).toBeInTheDocument()
+    expect(screen.getByText('L1 → L2')).toBeInTheDocument()
     expect(screen.getByTitle('PP01 主视频')).toBeInTheDocument()
     expect(document.querySelector('.pp-detail-page img')).toBeNull()
+  })
+
+  it('renders the complete postpartum library from the frozen bridge catalog in order', () => {
+    window.location.hash = '#/library/postpartum'
+    render(<App />)
+
+    expect(getRenderedPostpartumIds()).toEqual(postpartumPresentationBridgeCatalog.map((record) => record.presentation.id))
+    expect(screen.getByText(`显示 ${postpartumPresentationBridgeCatalog.length} / 26 个专项动作`)).toBeInTheDocument()
+  })
+
+  it('keeps postpartum library level and category filters Presentation-owned', () => {
+    window.location.hash = '#/library/postpartum'
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'L1' }))
+    expect(getRenderedPostpartumIds()).toEqual(
+      postpartumPresentationBridgeCatalog
+        .filter((record) => record.presentation.level.includes('l1'))
+        .map((record) => record.presentation.id),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '支撑模式' }))
+    expect(getRenderedPostpartumIds()).toEqual(
+      postpartumPresentationBridgeCatalog
+        .filter((record) => record.presentation.level.includes('l1') && record.presentation.category === '支撑模式')
+        .map((record) => record.presentation.id),
+    )
+  })
+
+  it('keeps postpartum library search Presentation-owned and preserves PP17 detail href', () => {
+    window.location.hash = '#/library/postpartum'
+    render(<App />)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'PP17' } })
+    const cards = document.querySelectorAll<HTMLAnchorElement>('.pp-card')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toHaveAttribute('href', '#/postpartum/pp17')
+  })
+
+  it('keeps the postpartum library collection backed by the frozen bridge catalog', () => {
+    expect(appSource).toContain('postpartumPresentationBridgeCatalog')
+    expect(appSource).not.toMatch(/const filtered = postpartumMovements\.filter/)
+  })
+
+  it('renders frozen Method metadata as a separate read-only surface beside legacy PP01 presentation', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp01')!
+    if (record.methodNode.mapping.status !== 'variant') throw new Error('Expected PP01 to be a variant mapping')
+
+    window.location.hash = '#/postpartum/pp01'
+    render(<App />)
+
+    expect(screen.getByText('教练卡内容（文字版）')).toBeInTheDocument()
+    const methodHeading = screen.getByRole('heading', { level: 2, name: '方法层（只读）' })
+    const methodSection = methodHeading.closest('section')
+    if (!(methodSection instanceof HTMLElement)) throw new Error('Missing postpartum Method section')
+    const method = within(methodSection)
+
+    expect(method.getByText(record.methodNode.id)).toBeInTheDocument()
+    expect(method.getByText(record.methodNode.progressionLevel)).toBeInTheDocument()
+    expect(method.getAllByText(record.methodNode.kind)).toHaveLength(2)
+    expect(method.getByText(record.methodNode.role)).toBeInTheDocument()
+    expect(method.getAllByText(record.methodNode.primaryPathway)).toHaveLength(2)
+    expect(method.getAllByText(record.methodNode.mapping.status)).toHaveLength(2)
+    expect(method.getByText(record.methodNode.mapping.variantId)).toBeInTheDocument()
+    expect(method.getByText(record.methodNode.breathing.mode)).toBeInTheDocument()
+    expect(method.getByText(record.methodNode.breathing.pressureIntent)).toBeInTheDocument()
+    for (const criterion of record.methodNode.qualityGate.criteria) {
+      expect(method.getByText(new RegExp(criterion.requirement))).toBeInTheDocument()
+    }
+    for (const compensation of record.methodNode.commonCompensations) {
+      expect(method.getByText(new RegExp(compensation))).toBeInTheDocument()
+    }
+  })
+
+  it('keeps method-only PP17 distinct from canonical exercise identity while exposing its host', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp17')!
+    if (record.methodNode.mapping.status !== 'method-only' || !record.methodNode.hostExerciseId) {
+      throw new Error('Expected PP17 to be a method-only node with a host exercise')
+    }
+
+    window.location.hash = '#/postpartum/pp17'
+    render(<App />)
+
+    const methodHeading = screen.getByRole('heading', { level: 2, name: '方法层（只读）' })
+    const methodSection = methodHeading.closest('section')
+    if (!(methodSection instanceof HTMLElement)) throw new Error('Missing postpartum Method section')
+    const method = within(methodSection)
+
+    expect(method.getByText('method-only')).toBeInTheDocument()
+    expect(method.getAllByText('drill')).toHaveLength(2)
+    const hostLabel = method.getByText('Host exercise')
+    expect(hostLabel.nextElementSibling).toHaveTextContent(record.methodNode.hostExerciseId)
+    expect(method.queryByText('canonical exercise')).toBeNull()
+  })
+
+  it('keeps the existing safe empty route for an unknown postpartum id', () => {
+    window.location.hash = '#/postpartum/does-not-exist'
+    render(<App />)
+
+    expect(screen.getByRole('heading', { level: 1, name: '专项动作不存在' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '返回' })).toHaveAttribute('href', '#/library/postpartum')
+  })
+
+  it('keeps App dependent on the frozen bridge instead of rebuilding the Method join', () => {
+    expect(appSource).toContain("getPostpartumPresentationBridgeRecord")
+    expect(appSource).not.toMatch(/from ['"]\.\/data\/pp\/methodNodes['"]/
+    )
+    expect(appSource).not.toMatch(/\b(?:ppMethodNodeById|ppMethodNodes)\b/)
+    expect(appSource.match(/getPostpartumPresentationBridgeRecord/g)).toHaveLength(6)
+  })
+
+  it('renders a separate female runtime section on the templates page with eight dedicated links', () => {
+    window.location.hash = '#/templates'
+    render(<App />)
+
+    const femaleHeading = screen.getByRole('heading', { level: 2, name: '女性 1+1+1' })
+    const femaleSection = femaleHeading.closest('.section-block')
+    if (!(femaleSection instanceof HTMLElement)) throw new Error('Missing female runtime section')
+
+    expect(within(femaleSection).getByText('8 个模板')).toBeInTheDocument()
+    expect(within(femaleSection).queryByText('4 个方案等级')).toBeNull()
+
+    const expectedLinks = femaleRuntimeTemplates.map(({ template }) => `#/female/${template.id}`)
+    const actualLinks = Array.from(femaleSection.querySelectorAll<HTMLAnchorElement>('a.template-card'))
+      .map((link) => link.getAttribute('href'))
+
+    expect(actualLinks).toEqual(expectedLinks)
+    expect(actualLinks.every((href) => typeof href === 'string' && !/\/l[1-4]$/.test(href))).toBe(true)
+
+    for (const { template } of femaleRuntimeTemplates) {
+      expect(within(femaleSection).getByText(template.code)).toBeInTheDocument()
+    }
+  })
+
+  it('renders female detail with exactly HIP SUPPORT CORE and keeps Templates nav active', () => {
+    window.location.hash = '#/female/fit-f01'
+    render(<App />)
+
+    expect(screen.getByRole('heading', { level: 2, name: 'HIP' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'SUPPORT' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'CORE' })).toBeInTheDocument()
+    expect(screen.queryByText('BREATH')).toBeNull()
+    expect(screen.queryByRole('tablist', { name: '方案等级' })).toBeNull()
+    expect(screen.getAllByText('PRIMARY_CHALLENGE')).toHaveLength(1)
+    expect(screen.getAllByText('SUPPORTING')).toHaveLength(2)
+
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    expect(within(nav).getByRole('link', { name: '模板' })).toHaveClass('active')
+  })
+
+  it('shows mapped canonical semantics without a variant id for FIT-F04 HIP', () => {
+    const mappedHip = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f04')!.slots.HIP
+
+    window.location.hash = '#/female/fit-f04'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    expect(hipCard.getByText(mappedHip.methodNode.id)).toBeInTheDocument()
+    expect(hipCard.getByText(mappedHip.canonical.exercise.id)).toBeInTheDocument()
+    expect(hipCard.getByText(mappedHip.canonical.exercise.name)).toBeInTheDocument()
+    expect(hipCard.getByText(mappedHip.canonical.mapping.status)).toBeInTheDocument()
+    expect(hipCard.queryByText('pp01-hip-dominant-squat')).toBeNull()
+  })
+
+  it('shows variant canonical semantics for FIT-F05 HIP', () => {
+    const variantHip = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f05')!.slots.HIP
+    if (variantHip.canonical.mapping.status !== 'variant') throw new Error('Expected FIT-F05 HIP to resolve as a variant mapping')
+
+    window.location.hash = '#/female/fit-f05'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    expect(hipCard.getByText(variantHip.canonical.exercise.id)).toBeInTheDocument()
+    expect(hipCard.getByText(variantHip.canonical.exercise.name)).toBeInTheDocument()
+    expect(hipCard.getByText(variantHip.canonical.mapping.status)).toBeInTheDocument()
+    expect(hipCard.getByText(variantHip.canonical.mapping.variantId)).toBeInTheDocument()
+  })
+
+  it('shows conditional readiness as read-only runtime state for FIT-F07', () => {
+    const fitF07 = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f07')!
+
+    window.location.hash = '#/female/fit-f07'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    const supportCard = getSlotCard('SUPPORT')
+    const coreCard = getSlotCard('CORE')
+
+    expect(fitF07.slots.HIP.requiresConditionalReadiness).toBe(true)
+    expect(fitF07.slots.SUPPORT.requiresConditionalReadiness).toBe(true)
+    expect(fitF07.slots.CORE.requiresConditionalReadiness).toBe(false)
+
+    expect(hipCard.getByText('需要条件就绪')).toBeInTheDocument()
+    expect(supportCard.getByText('需要条件就绪')).toBeInTheDocument()
+    expect(coreCard.getByText('无需额外条件就绪')).toBeInTheDocument()
+    expect(screen.queryByText('已就绪')).toBeNull()
+    expect(screen.queryByText('未就绪')).toBeNull()
+  })
+
+  it('shows method and policy metadata from the resolved runtime for FIT-F04 HIP', () => {
+    const fitF04Hip = femaleRuntimeTemplates.find((item) => item.template.id === 'fit-f04')!.slots.HIP
+
+    window.location.hash = '#/female/fit-f04'
+    render(<App />)
+
+    const hipCard = getSlotCard('HIP')
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.mode)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.pressureIntent)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.inhale!)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.methodNode.breathing.exhale!)).toBeInTheDocument()
+    for (const criterion of fitF04Hip.methodNode.qualityGate.criteria) {
+      expect(hipCard.getByText(criterion.requirement)).toBeInTheDocument()
+    }
+    for (const compensation of fitF04Hip.methodNode.commonCompensations) {
+      expect(hipCard.getByText(compensation)).toBeInTheDocument()
+    }
+    expect(hipCard.getByText(fitF04Hip.policy.eligibility)).toBeInTheDocument()
+    expect(hipCard.getByText(fitF04Hip.policy.demand)).toBeInTheDocument()
+  })
+
+  it('uses the existing safe empty route for unknown female template ids', () => {
+    window.location.hash = '#/female/does-not-exist'
+    render(<App />)
+
+    expect(screen.getByRole('heading', { level: 1, name: '模板不存在' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '返回' })).toHaveAttribute('href', '#/templates')
   })
 })

@@ -18,6 +18,60 @@ export {
   ppProgressionEdges,
   validatePPProgressionGraph,
 } from './progressionGraph'
+export {
+  ppFemaleChallengeRoles,
+  ppFemaleDemandScores,
+  ppFemaleDemands,
+  ppFemaleEligibilities,
+  ppFemaleEligibilityCounts,
+  ppFemaleProgrammingPolicy,
+  ppFemaleSlots,
+} from './femaleProgrammingPolicy'
+export type {
+  PPFemaleBlockSelection,
+  PPFemaleChallengeRole,
+  PPFemaleDemand,
+  PPFemaleEligibility,
+  PPFemalePolicyEntry,
+  PPFemaleProgrammingContext,
+  PPFemaleSlot,
+  PPFemaleValidationIssue,
+  PPFemaleValidationIssueCode,
+} from './femaleProgrammingPolicy'
+export {
+  getFemaleProgrammingCandidates,
+  validateFemaleProgrammingBlock,
+  validateFemaleProgrammingPolicy,
+} from './femaleProgrammingRules'
+export {
+  ppFemaleProgrammingTemplates,
+} from './femaleProgrammingTemplates'
+export type {
+  PPFemaleTemplate,
+  PPFemaleTemplateIntent,
+} from './femaleProgrammingTemplates'
+export {
+  getFemaleProgrammingTemplate,
+  getFemaleTemplateRequiredConditionalNodes,
+  validateFemaleProgrammingTemplate,
+  validateFemaleProgrammingTemplates,
+} from './femaleProgrammingTemplateRules'
+export type {
+  PPFemaleTemplateValidationIssue,
+  PPFemaleTemplateValidationIssueCode,
+} from './femaleProgrammingTemplateRules'
+export {
+  PPFemaleRuntimeResolutionError,
+  resolveFemaleRuntimeCanonicalBinding,
+  resolveFemaleProgrammingTemplate,
+  resolveFemaleProgrammingTemplates,
+} from './femaleProgrammingRuntime'
+export type {
+  PPFemaleRuntimeCanonicalBinding,
+  PPFemaleRuntimeResolutionErrorCode,
+  PPFemaleRuntimeSlot,
+  ResolvedFemaleProgrammingTemplate,
+} from './femaleProgrammingRuntime'
 
 export const canonicalExerciseIds: ReadonlySet<string> = new Set(
   exercises.map((exercise) => exercise.id),

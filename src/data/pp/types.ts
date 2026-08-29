@@ -36,24 +36,28 @@ export type PPPathway =
   | 'locomotion'
   | 'integration'
 
-export type PPCapability =
-  | 'breathing-control'
-  | 'rib-pelvis-control'
-  | 'anti-extension'
-  | 'anti-rotation'
-  | 'anti-lateral-flexion'
-  | 'contralateral-control'
-  | 'shoulder-support'
-  | 'pelvic-control'
-  | 'hip-extension'
-  | 'hip-hinge'
-  | 'hip-rotation'
-  | 'hip-adduction'
-  | 'hip-abduction'
-  | 'weight-shift'
-  | 'locomotion'
-  | 'rotation'
-  | 'force-transfer'
+export const ppCapabilities = [
+  'breathing-control',
+  'rib-pelvis-control',
+  'anti-extension',
+  'anti-rotation',
+  'anti-lateral-flexion',
+  'contralateral-control',
+  'shoulder-support',
+  'pelvic-control',
+  'hip-extension',
+  'hip-hinge',
+  'hip-rotation',
+  'hip-adduction',
+  'hip-abduction',
+  'weight-shift',
+  'locomotion',
+  'rotation',
+  'force-transfer',
+  'hip-flexion',
+] as const
+
+export type PPCapability = (typeof ppCapabilities)[number]
 
 export type PPProgressionLevel = 'P0' | 'P1' | 'P2' | 'P3' | 'P4'
 
@@ -94,6 +98,29 @@ export type PPQualityGate = {
   passRule: 'all'
 }
 
+export const ppMethodReadinessProfileIds = [
+  'breath-rib-pelvis-foundation',
+  'hinge-control',
+  'squat-control',
+  'hip-rotation-control',
+  'hip-extension-control',
+  'frontal-plane-weight-shift',
+  'anterior-support',
+  'dynamic-support',
+  'lateral-support',
+  'anti-extension-core',
+  'rotation-integration',
+  'locomotion',
+] as const
+
+export type PPMethodReadinessProfileId =
+  (typeof ppMethodReadinessProfileIds)[number]
+
+export type PPMethodReadinessProfile = {
+  qualityGate: PPQualityGate
+  commonCompensations: readonly string[]
+}
+
 export type PPMethodNode = {
   id: PPMethodNodeId
   source?: {
@@ -109,6 +136,7 @@ export type PPMethodNode = {
   progressionLevel: PPProgressionLevel
   role: PPMethodNodeRole
   capabilities: readonly PPCapability[]
+  readinessProfile: PPMethodReadinessProfileId
   breathing: PPBreathingStrategy
   qualityGate: PPQualityGate
   commonCompensations: readonly string[]
@@ -119,7 +147,7 @@ export type PPProgressionEdge = {
   from: PPMethodNodeId
   to: PPMethodNodeId
   type: 'progression' | 'branch' | 'optional'
-  capabilityDelta: readonly string[]
+  capabilityDelta: readonly PPCapability[]
   reason: string
 }
 

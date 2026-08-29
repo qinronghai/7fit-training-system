@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type {
   PPCanonicalMapping,
+  PPCapability,
+  PPProgressionEdge,
   PPProgressionLevel,
 } from '../src/data/pp/types'
-import { ppCanonicalMappingStatuses } from '../src/data/pp/types'
+import {
+  ppCanonicalMappingStatuses,
+  ppCapabilities,
+  ppMethodReadinessProfileIds,
+} from '../src/data/pp/types'
 import { exercises } from '../src/data/exercises/exercises'
 import {
   ppMethodNodeById,
   ppMethodNodes,
+  ppMethodReadinessProfiles,
   ppVerificationLedger,
 } from '../src/data/pp/methodNodes'
 import { ppProgressionEdges } from '../src/data/pp/progressionGraph'
@@ -18,6 +25,15 @@ import {
   validatePPMethodContract,
   validatePPVerificationLedger,
 } from '../src/data/pp'
+
+const invalidCapabilityEdge: PPProgressionEdge = {
+  from: 'pp20',
+  to: 'pp21',
+  type: 'progression',
+  // @ts-expect-error unknown capability must not compile
+  capabilityDelta: ['unknown-capability'],
+  reason: 'type contract fixture',
+}
 
 describe('PP-E3 method type contract', () => {
   it('exposes the five canonical mapping statuses', () => {
@@ -115,6 +131,158 @@ describe('PP-E3 method type contract', () => {
     expect(pp17?.kind).toBe('drill')
   })
 
+  it('assigns every PP node to one of the 12 reusable readiness profiles', () => {
+    expect(ppMethodReadinessProfileIds).toHaveLength(12)
+    expect(new Set(ppMethodNodes.map((node) => node.readinessProfile)).size).toBe(12)
+    expect(Object.keys(ppMethodReadinessProfiles).sort()).toEqual(
+      [...ppMethodReadinessProfileIds].sort(),
+    )
+
+    for (const methodNode of ppMethodNodes) {
+      expect(ppMethodReadinessProfiles[methodNode.readinessProfile]).toBeDefined()
+      expect(methodNode.qualityGate.passRule).toBe('all')
+      expect(methodNode.qualityGate.criteria.length).toBeGreaterThan(0)
+      expect(methodNode.commonCompensations.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps the approved profile assignments for key method nodes', () => {
+    expect(ppMethodNodeById.get('pp03')?.readinessProfile).toBe('hinge-control')
+    expect(ppMethodNodeById.get('pp05')?.readinessProfile).toBe('hip-rotation-control')
+    expect(ppMethodNodeById.get('pp16')?.readinessProfile).toBe('anterior-support')
+    expect(ppMethodNodeById.get('pp13')?.readinessProfile).toBe('rotation-integration')
+    expect(ppMethodNodeById.get('pp23')?.readinessProfile).toBe('anti-extension-core')
+    expect(ppMethodNodeById.get('pp24')?.readinessProfile).toBe('anti-extension-core')
+    expect(ppMethodNodeById.get('pp26')?.readinessProfile).toBe('anti-extension-core')
+
+    const expectedAssignments: Record<string, readonly string[]> = {
+      'breath-rib-pelvis-foundation': [
+        'pp17', 'pp20', 'pp21', 'pp22',
+        'exp-supine-90-90-breathing', 'exp-side-lying-breathing',
+      ],
+      'hinge-control': [
+        'pp02', 'pp03', 'exp-wall-touch-hinge', 'exp-dowel-three-point-hinge',
+      ],
+      'squat-control': [
+        'pp01', 'exp-assisted-sit-to-stand', 'exp-box-squat',
+      ],
+      'hip-rotation-control': [
+        'pp04', 'pp05', 'exp-supported-90-90', 'exp-static-90-90',
+      ],
+      'hip-extension-control': [
+        'pp10', 'exp-glute-bridge-march', 'exp-single-leg-glute-bridge',
+      ],
+      'frontal-plane-weight-shift': [
+        'pp08', 'pp09', 'exp-long-lever-side-lying-adduction',
+        'exp-standing-lateral-weight-shift', 'exp-basic-hip-abduction',
+      ],
+      'anterior-support': ['pp16', 'exp-incline-plank'],
+      'dynamic-support': [
+        'pp11', 'pp14', 'pp15', 'exp-quadruped-single-limb-lift',
+        'exp-incline-support-weight-shift', 'exp-plank-march',
+        'exp-short-forward-step-high-plank',
+      ],
+      'lateral-support': [
+        'pp18', 'pp19', 'exp-knee-side-plank', 'exp-standard-side-plank',
+        'exp-side-plank-reach', 'exp-partial-side-plank-rotation',
+        'exp-short-lever-copenhagen', 'exp-full-copenhagen',
+      ],
+      'anti-extension-core': ['pp23', 'pp24', 'pp26'],
+      'rotation-integration': ['pp12', 'pp13', 'pp25', 'exp-open-book'],
+      locomotion: [
+        'pp06', 'pp07', 'exp-standing-march', 'exp-half-squat-low-locomotion',
+      ],
+    }
+    const expectedIds = Object.values(expectedAssignments).flat()
+    expect(expectedIds).toHaveLength(53)
+    expect(new Set(expectedIds)).toHaveLength(53)
+    for (const [profileId, expectedIdsForProfile] of Object.entries(expectedAssignments)) {
+      const actualIdsForProfile = ppMethodNodes
+        .filter((node) => node.readinessProfile === profileId)
+        .map((node) => node.id)
+        .sort()
+      expect(actualIdsForProfile).toEqual([...expectedIdsForProfile].sort())
+    }
+  })
+
+  it('gives exactly the 12 targeted nodes distinct semantic readiness overrides', () => {
+    const targetedExpectations: Record<string, RegExp> = {
+      pp03: /overhead|推举/i,
+      pp05: /hip-extension|髋伸展/i,
+      pp11: /contralateral|对侧/i,
+      pp13: /force-transfer|力量传递/i,
+      pp15: /hip-flexion|髋屈曲/i,
+      pp16: /duration|rib|pelvis|持续|肋骨|骨盆/i,
+      pp18: /rotation|force-transfer|旋转|力量传递/i,
+      pp19: /abduction|pelvis|外展|骨盆/i,
+      pp23: /contralateral|breath|对侧|呼吸/i,
+      pp24: /bilateral|extension|双侧|伸展/i,
+      pp25: /rotation|lumbar|旋转|腰椎/i,
+      pp26: /rib|pelvis|repeat|肋骨|骨盆|重复/i,
+    }
+
+    expect(Object.keys(targetedExpectations)).toHaveLength(12)
+    const targetedIds = new Set(Object.keys(targetedExpectations))
+    for (const [id, marker] of Object.entries(targetedExpectations)) {
+      const methodNode = ppMethodNodeById.get(id)
+      const profile = ppMethodReadinessProfiles[methodNode!.readinessProfile]
+      const nodeText = [
+        ...methodNode!.qualityGate.criteria.map((item) => `${item.code} ${item.requirement}`),
+        ...methodNode!.commonCompensations,
+      ].join(' ')
+      const profileText = [
+        ...profile.qualityGate.criteria.map((item) => `${item.code} ${item.requirement}`),
+        ...profile.commonCompensations,
+      ].join(' ')
+
+      expect(nodeText).toMatch(marker)
+      expect(nodeText).not.toBe(profileText)
+    }
+
+    for (const methodNode of ppMethodNodes) {
+      if (targetedIds.has(methodNode.id)) continue
+      const profile = ppMethodReadinessProfiles[methodNode.readinessProfile]
+      expect(methodNode.qualityGate).toEqual(profile.qualityGate)
+      expect(methodNode.commonCompensations).toEqual(profile.commonCompensations)
+    }
+
+    const pp03Codes = ppMethodNodeById.get('pp03')!.qualityGate.criteria.map((item) => item.code)
+    expect(pp03Codes).toEqual(expect.arrayContaining(['BREATH', 'CONTROL', 'COORDINATION', 'TOLERANCE']))
+    const pp16 = ppMethodNodeById.get('pp16')!
+    expect(pp16.qualityGate.criteria.map((item) => item.code))
+      .toEqual(expect.arrayContaining(['POSITION', 'DURATION']))
+    expect(pp16.qualityGate.criteria.some((item) =>
+      item.domain === 'position' && /rib|pelvis|肋骨|骨盆/i.test(item.requirement),
+    )).toBe(true)
+  })
+
+  it('keeps the exact cross-cutting breathing mode contract', () => {
+    const idsByBreathingMode = (mode: 'continuous' | 'phase-cued' | 'reset') =>
+      ppMethodNodes
+        .filter((node) => node.breathing.mode === mode)
+        .map((node) => node.id)
+        .sort()
+
+    expect(idsByBreathingMode('phase-cued')).toEqual([
+      'pp03', 'pp10', 'pp16', 'pp18', 'pp19',
+      'pp22', 'pp23', 'pp24', 'pp25', 'pp26',
+    ])
+    expect(idsByBreathingMode('reset')).toEqual([
+      'exp-side-lying-breathing',
+      'exp-standing-lateral-weight-shift',
+      'exp-supine-90-90-breathing',
+      'pp06', 'pp17', 'pp20', 'pp21',
+    ])
+    expect(idsByBreathingMode('continuous')).toHaveLength(36)
+    expect(idsByBreathingMode('phase-cued')).toHaveLength(10)
+    expect(idsByBreathingMode('reset')).toHaveLength(7)
+    expect(ppMethodNodeById.get('pp06')?.kind).toBe('drill')
+    expect(ppMethodNodeById.get('pp17')?.kind).toBe('drill')
+    expect(ppMethodNodeById.get('pp20')?.kind).toBe('drill')
+    expect(ppMethodNodeById.get('pp21')?.kind).toBe('breathing')
+    expect(ppMethodNodeById.get('pp22')?.kind).toBe('breathing')
+  })
+
   it('keeps the PP verification ledger empty after the three resolved mappings', () => {
     expect(ppMethodNodeById.get('pp03')?.mapping).toEqual({
       status: 'mapped',
@@ -162,6 +330,51 @@ describe('PP-E3 method type contract', () => {
       expect.objectContaining({ from: 'pp20', to: 'exp-quadruped-single-limb-lift' }),
       expect.objectContaining({ from: 'exp-quadruped-single-limb-lift', to: 'pp11' }),
     ]))
+  })
+
+  it('resolves PP05 connectivity, PP03 root semantics and the pp06 branch', () => {
+    const pp05Edges = ppProgressionEdges.filter((edge) =>
+      edge.from === 'pp05' || edge.to === 'pp05',
+    )
+    expect(pp05Edges).toHaveLength(1)
+    expect(pp05Edges[0]).toMatchObject({
+      from: 'pp04',
+      to: 'pp05',
+      type: 'progression',
+      capabilityDelta: ['hip-extension'],
+    })
+    expect(ppMethodNodeById.get('pp04')).toMatchObject({
+      progressionLevel: 'P1',
+      capabilities: expect.arrayContaining(['hip-rotation', 'pelvic-control']),
+    })
+    expect(ppMethodNodeById.get('pp05')).toMatchObject({
+      progressionLevel: 'P2',
+      capabilities: expect.arrayContaining(['hip-rotation', 'hip-extension', 'pelvic-control']),
+    })
+    expect(ppProgressionEdges).toHaveLength(45)
+
+    const pp03 = ppMethodNodeById.get('pp03')!
+    expect(pp03).toMatchObject({
+      progressionLevel: 'P4',
+      role: 'integration',
+      primaryPathway: 'integration',
+      secondaryPathways: ['hinge', 'support'],
+      readinessProfile: 'hinge-control',
+    })
+    expect(ppProgressionEdges.filter((edge) => edge.to === 'pp03')).toEqual([])
+    expect(ppProgressionEdges.some((edge) => edge.from === 'pp02' && edge.to === 'pp03')).toBe(false)
+    expect(pp03.coachNotes?.some((note) => note.includes('外部') && note.includes('推举'))).toBe(true)
+
+    const pp06Edge = ppProgressionEdges.find((edge) =>
+      edge.from === 'pp06' && edge.to === 'exp-standing-lateral-weight-shift',
+    )
+    expect(pp06Edge).toMatchObject({
+      type: 'branch',
+      capabilityDelta: ['weight-shift', 'locomotion'],
+    })
+    expect(pp06Edge?.reason).toContain('分支')
+    expect(ppMethodNodeById.get('pp06')?.progressionLevel).toBe('P1')
+    expect(ppMethodNodeById.get('exp-standing-lateral-weight-shift')?.progressionLevel).toBe('P0')
   })
 
   it('materializes the approved progression map across every pathway', () => {
@@ -261,5 +474,77 @@ describe('PP-E3 method type contract', () => {
         reason: 'cycle test edge',
       },
     ])).toContain('progression graph contains a cycle at: pp20')
+  })
+
+  it('enforces declared capability deltas and non-empty edge reasons', () => {
+    expect(ppCapabilities).toHaveLength(18)
+    expect(new Set(ppCapabilities)).toHaveLength(18)
+    expect([...ppCapabilities].sort()).toEqual([
+      'anti-extension',
+      'anti-lateral-flexion',
+      'anti-rotation',
+      'breathing-control',
+      'contralateral-control',
+      'force-transfer',
+      'hip-abduction',
+      'hip-adduction',
+      'hip-extension',
+      'hip-flexion',
+      'hip-hinge',
+      'hip-rotation',
+      'locomotion',
+      'pelvic-control',
+      'rib-pelvis-control',
+      'rotation',
+      'shoulder-support',
+      'weight-shift',
+    ].sort())
+
+    const hipFlexionNodes = ppMethodNodes
+      .filter((node) => node.capabilities.includes('hip-flexion' as PPCapability))
+      .map((node) => node.id)
+      .sort()
+    expect(hipFlexionNodes).toEqual([
+      'exp-plank-march',
+      'exp-short-forward-step-high-plank',
+      'pp13',
+      'pp14',
+      'pp15',
+    ])
+
+    const unknownCapabilityErrors = validatePPProgressionGraph(ppMethodNodes, [
+      {
+        from: 'pp20',
+        to: 'pp21',
+        type: 'progression',
+        capabilityDelta: ['unknown-capability'] as unknown as PPCapability[],
+        reason: 'runtime contract fixture',
+      },
+    ])
+    expect(unknownCapabilityErrors).toEqual(expect.arrayContaining([
+      expect.stringContaining('progression edge capabilityDelta is not declared: unknown-capability'),
+    ]))
+    expect(unknownCapabilityErrors.some((error) => error.includes('pp20 -> pp21'))).toBe(true)
+
+    const nonSubsetErrors = validatePPProgressionGraph(ppMethodNodes, [
+      {
+        from: 'pp20',
+        to: 'pp21',
+        type: 'progression',
+        capabilityDelta: ['force-transfer'],
+        reason: 'declared capability semantics fixture',
+      },
+    ])
+    expect(nonSubsetErrors).toEqual([])
+
+    expect(validatePPProgressionGraph(ppMethodNodes, [
+      {
+        from: 'pp20',
+        to: 'pp21',
+        type: 'progression',
+        capabilityDelta: ['force-transfer'],
+        reason: '   ',
+      },
+    ])).toContain('progression edge reason is empty: pp20 -> pp21')
   })
 })
