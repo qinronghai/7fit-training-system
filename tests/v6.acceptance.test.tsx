@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import {
   allRoutes,
   getLibraryAction,
@@ -16,6 +16,7 @@ import { App } from '../src/App'
 import appSource from '../src/App.tsx?raw'
 import { resolveFemaleProgrammingTemplates } from '../src/data/pp'
 import { getPostpartumPresentationBridgeRecord } from '../src/data/postpartumPresentationBridge'
+import { postpartumPresentationBridgeCatalog } from '../src/data/postpartumPresentationBridge'
 import { bodyTemplates } from '../src/data/programming/bodyTemplates'
 import { conditioningTemplates } from '../src/data/programming/conditioningTemplates'
 import { threeCTemplates } from '../src/data/programming/threeCTemplates'
@@ -30,6 +31,9 @@ const getSlotCard = (slot: 'HIP' | 'SUPPORT' | 'CORE') => {
   if (!(card instanceof HTMLElement)) throw new Error(`Missing slot card for ${slot}`)
   return within(card)
 }
+
+const getRenderedPostpartumIds = () => Array.from(document.querySelectorAll<HTMLAnchorElement>('.pp-card'))
+  .map((card) => card.querySelector('.card-meta span')?.textContent?.toLowerCase())
 
 describe('7Fit V6 content contract', () => {
   it('keeps the 66 migrated route pages addressable', () => {
@@ -258,6 +262,48 @@ describe('7Fit V6 routing and shell', () => {
     expect(screen.getByText('L1 → L2')).toBeInTheDocument()
     expect(screen.getByTitle('PP01 主视频')).toBeInTheDocument()
     expect(document.querySelector('.pp-detail-page img')).toBeNull()
+  })
+
+  it('renders the complete postpartum library from the frozen bridge catalog in order', () => {
+    window.location.hash = '#/library/postpartum'
+    render(<App />)
+
+    expect(getRenderedPostpartumIds()).toEqual(postpartumPresentationBridgeCatalog.map((record) => record.presentation.id))
+    expect(screen.getByText(`显示 ${postpartumPresentationBridgeCatalog.length} / 26 个专项动作`)).toBeInTheDocument()
+  })
+
+  it('keeps postpartum library level and category filters Presentation-owned', () => {
+    window.location.hash = '#/library/postpartum'
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'L1' }))
+    expect(getRenderedPostpartumIds()).toEqual(
+      postpartumPresentationBridgeCatalog
+        .filter((record) => record.presentation.level.includes('l1'))
+        .map((record) => record.presentation.id),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '支撑模式' }))
+    expect(getRenderedPostpartumIds()).toEqual(
+      postpartumPresentationBridgeCatalog
+        .filter((record) => record.presentation.level.includes('l1') && record.presentation.category === '支撑模式')
+        .map((record) => record.presentation.id),
+    )
+  })
+
+  it('keeps postpartum library search Presentation-owned and preserves PP17 detail href', () => {
+    window.location.hash = '#/library/postpartum'
+    render(<App />)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'PP17' } })
+    const cards = document.querySelectorAll<HTMLAnchorElement>('.pp-card')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toHaveAttribute('href', '#/postpartum/pp17')
+  })
+
+  it('keeps the postpartum library collection backed by the frozen bridge catalog', () => {
+    expect(appSource).toContain('postpartumPresentationBridgeCatalog')
+    expect(appSource).not.toMatch(/const filtered = postpartumMovements\.filter/)
   })
 
   it('renders frozen Method metadata as a separate read-only surface beside legacy PP01 presentation', () => {
