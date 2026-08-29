@@ -43,6 +43,23 @@ export {
   validateFemaleProgrammingBlock,
   validateFemaleProgrammingPolicy,
 } from './femaleProgrammingRules'
+export {
+  ppFemaleProgrammingTemplates,
+} from './femaleProgrammingTemplates'
+export type {
+  PPFemaleTemplate,
+  PPFemaleTemplateIntent,
+} from './femaleProgrammingTemplates'
+export {
+  getFemaleProgrammingTemplate,
+  getFemaleTemplateRequiredConditionalNodes,
+  validateFemaleProgrammingTemplate,
+  validateFemaleProgrammingTemplates,
+} from './femaleProgrammingTemplateRules'
+export type {
+  PPFemaleTemplateValidationIssue,
+  PPFemaleTemplateValidationIssueCode,
+} from './femaleProgrammingTemplateRules'
 
 export const canonicalExerciseIds: ReadonlySet<string> = new Set(
   exercises.map((exercise) => exercise.id),
