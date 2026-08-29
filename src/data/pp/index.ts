@@ -60,6 +60,16 @@ export type {
   PPFemaleTemplateValidationIssue,
   PPFemaleTemplateValidationIssueCode,
 } from './femaleProgrammingTemplateRules'
+export {
+  PPFemaleRuntimeResolutionError,
+  resolveFemaleProgrammingTemplate,
+  resolveFemaleProgrammingTemplates,
+} from './femaleProgrammingRuntime'
+export type {
+  PPFemaleRuntimeResolutionErrorCode,
+  PPFemaleRuntimeSlot,
+  ResolvedFemaleProgrammingTemplate,
+} from './femaleProgrammingRuntime'
 
 export const canonicalExerciseIds: ReadonlySet<string> = new Set(
   exercises.map((exercise) => exercise.id),
