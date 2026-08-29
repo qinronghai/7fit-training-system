@@ -131,6 +131,22 @@ const validateSourceCatalog = (sources: PPPostpartumPresentationBridgeSources): 
         ))
       }
       methodSourceIds.add(methodNode.source.sourceId)
+
+      const presentation = presentationById.get(methodNode.id)
+      if (presentation && methodNode.source.sourceId !== presentation.id.toUpperCase()) {
+        issues.push(createIssue(
+          'SOURCE_ID_MISMATCH',
+          `method node source id mismatch: ${methodNode.id}`,
+          { presentationId: presentation.id, methodNodeId: methodNode.id },
+        ))
+      }
+      if (presentation && methodNode.source.sourceName !== presentation.name) {
+        issues.push(createIssue(
+          'SOURCE_NAME_MISMATCH',
+          `method node source name mismatch: ${methodNode.id}`,
+          { presentationId: presentation.id, methodNodeId: methodNode.id },
+        ))
+      }
     }
   }
 

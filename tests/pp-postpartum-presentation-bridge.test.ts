@@ -133,6 +133,50 @@ describe('PP-G1B2B postpartum presentation bridge', () => {
     })).toThrow()
   })
 
+  it('fails closed when a presentation counterpart is missing', () => {
+    expect(() => buildPostpartumPresentationBridgeCatalog({
+      presentations: postpartumMovements.filter((presentation) => presentation.id !== 'pp26'),
+      methodNodes: ppMethodNodes,
+    })).toThrow(/missing presentation counterpart: pp26/)
+  })
+
+  it('fails closed when a Method node ID is duplicated', () => {
+    expect(() => buildPostpartumPresentationBridgeCatalog({
+      presentations: postpartumMovements,
+      methodNodes: [...ppMethodNodes, cloneMethodNode(ppMethodNodeById.get('pp01')!)],
+    })).toThrow(/duplicate method node id: pp01/)
+  })
+
+  it('fails closed when a joined Method node source ID mismatches', () => {
+    const malformedMethodNodes = ppMethodNodes.map((methodNode) => (
+      methodNode.id === 'pp01'
+        ? cloneMethodNode(methodNode, {
+          source: { ...methodNode.source!, sourceId: 'PP00' as `PP${string}` },
+        })
+        : methodNode
+    ))
+
+    expect(() => buildPostpartumPresentationBridgeCatalog({
+      presentations: postpartumMovements,
+      methodNodes: malformedMethodNodes,
+    })).toThrow(/method node source id mismatch: pp01/)
+  })
+
+  it('fails closed when a joined Method node source name mismatches', () => {
+    const malformedMethodNodes = ppMethodNodes.map((methodNode) => (
+      methodNode.id === 'pp01'
+        ? cloneMethodNode(methodNode, {
+          source: { ...methodNode.source!, sourceName: 'wrong name' },
+        })
+        : methodNode
+    ))
+
+    expect(() => buildPostpartumPresentationBridgeCatalog({
+      presentations: postpartumMovements,
+      methodNodes: malformedMethodNodes,
+    })).toThrow(/method node source name mismatch: pp01/)
+  })
+
   it.each([
     [
       'duplicate presentation ids',
