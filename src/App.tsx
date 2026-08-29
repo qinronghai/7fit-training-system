@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, Check, ChevronRight, Copy, ExternalLink, Heart, Moon, Search, ShieldAlert, Sun } from 'lucide-react'
-import { getLibraryAction, getLibraryActionId, getPattern, getPostpartumMovement, getTemplate, librarySections, movementPatterns, templates, type ActionEntity, type Level, type Template } from './data/content'
+import { getLibraryAction, getLibraryActionId, getPattern, getTemplate, librarySections, movementPatterns, templates, type ActionEntity, type Level, type Template } from './data/content'
 import { resolveFemaleProgrammingTemplates } from './data/pp'
 import { getPostpartumPresentationBridgeRecord, postpartumPresentationBridgeCatalog } from './data/postpartumPresentationBridge'
 import { getRoute, navigate, type Route } from './lib/router'
@@ -95,8 +95,8 @@ const HomePage = () => {
       ...movementPatterns.filter((item) => `${item.id} ${item.name}`.toLowerCase().includes(q)).map((item) => ({ id: item.id, title: item.name, meta: 'Movement Pattern', href: `#/patterns/${item.id}` })),
     ].slice(0, 8)
   }, [query])
-  const recentItems = recent.map((id) => getPostpartumMovement(id) ?? getTemplate(id)).filter((item): item is ActionEntity | Template => Boolean(item))
-  const favItems = favorites.map((id) => getPostpartumMovement(id)).filter((item): item is ActionEntity => Boolean(item))
+  const recentItems = recent.map((id) => getPostpartumPresentationBridgeRecord(id)?.presentation ?? getTemplate(id)).filter((item): item is ActionEntity | Template => Boolean(item))
+  const favItems = favorites.map((id) => getPostpartumPresentationBridgeRecord(id)?.presentation).filter((item): item is ActionEntity => Boolean(item))
   return <div className="page home-page">
     <section className="hero-panel">
       <div><Eyebrow>COACH WORKSPACE · V6</Eyebrow><h1>教练工作台</h1><p>从目标到动作，一次找到今天要带的训练。</p></div>
@@ -206,7 +206,7 @@ const PatternsPage = () => <div className="page"><PageTitle eyebrow="MOVEMENT PA
 const PatternDetailPage = ({ id }: { id: string }) => {
   const pattern = getPattern(id)
   if (!pattern) return <EmptyRoute title="动作模式不存在" href="#/patterns" />
-  const linked = pattern.postpartumIds.map(getPostpartumMovement).filter(Boolean) as ActionEntity[]
+  const linked = pattern.postpartumIds.map((id) => getPostpartumPresentationBridgeRecord(id)?.presentation).filter(Boolean) as ActionEntity[]
   return <div className="page detail-page"><div className="sticky-context"><a href="#/patterns"><ArrowLeft size={16} /> 动作模式</a><span>{pattern.name}</span><span /></div><div className="detail-title"><Eyebrow>MOVEMENT PATTERN · {pattern.englishName}</Eyebrow><h1>{pattern.name}</h1><p>从动作技术到训练场景的桥梁；先看控制质量，再决定是否进入更高复杂度。</p></div><section className="pattern-hero"><div className="pattern-hero-number">{pattern.postpartumIds.length}</div><div><b>产后专项交叉</b><p>这些动作保留产后语境，可作为准备、退阶或正式训练使用。</p></div></section><section className="workout-section"><SectionHeading title="关联 PP 动作" action={<span className="muted">双向映射</span>} /><div className="action-grid">{linked.map((item) => <ActionCard item={item} key={item.id} />)}</div></section>{!linked.length && <div className="empty-card"><div><b>当前没有产后交叉动作</b><p>普通训练动作仍可从动作库继续查看。</p></div></div>}</div>
 }
 

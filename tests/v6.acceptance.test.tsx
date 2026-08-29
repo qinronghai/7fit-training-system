@@ -311,6 +311,67 @@ describe('7Fit V6 routing and shell', () => {
     expect(appSource).not.toMatch(/\bpostpartumMovements\b/)
   })
 
+  it('resolves Home recent PP ids through the bridge while preserving template fallback and order', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp17')!
+    const template = templates.find((item) => item.id === '3c1')!
+    localStorage.setItem('7fit-v6-recent', JSON.stringify(['pp17', '3c1', 'unknown']))
+    window.location.hash = '#/home'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '最近使用' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing recent section')
+    const links = Array.from(section.querySelectorAll<HTMLAnchorElement>('.compact-list > a'))
+
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['#/postpartum/pp17', '#/templates/3c1/l1'])
+    expect(links.map((link) => link.querySelector('b')?.textContent)).toEqual([record.presentation.name, template.name])
+  })
+
+  it('resolves Home favorites through the bridge and preserves favorite control behavior', () => {
+    const record = getPostpartumPresentationBridgeRecord('pp17')!
+    localStorage.setItem('7fit-v6-favorites', JSON.stringify(['pp17', 'unknown']))
+    window.location.hash = '#/home'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '我的收藏' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing favorites section')
+    const card = section.querySelector<HTMLAnchorElement>('.action-card')
+    expect(card).toHaveAttribute('href', '#/postpartum/pp17')
+    expect(card).toHaveTextContent(record.presentation.name)
+
+    fireEvent.click(within(section).getByRole('button', { name: '取消收藏' }))
+    expect(JSON.parse(localStorage.getItem('7fit-v6-favorites') ?? '[]')).not.toContain('pp17')
+  })
+
+  it('resolves PatternDetailPage PP links through exact frozen bridge records', () => {
+    const pattern = movementPatterns.find((item) => item.id === 'squat')!
+    const expected = pattern.postpartumIds
+      .map((id) => getPostpartumPresentationBridgeRecord(id)?.presentation)
+      .filter(Boolean) as Array<NonNullable<ReturnType<typeof getPostpartumPresentationBridgeRecord>>['presentation']>
+    window.location.hash = '#/patterns/squat'
+    render(<App />)
+
+    const section = screen.getByRole('heading', { level: 2, name: '关联 PP 动作' }).closest('section')
+    if (!(section instanceof HTMLElement)) throw new Error('Missing pattern PP section')
+    const cards = Array.from(section.querySelectorAll<HTMLAnchorElement>('.action-card'))
+    expect(cards.map((card) => card.getAttribute('href'))).toEqual(expected.map((item) => `#/postpartum/${item.id}`))
+    expect(cards.map((card) => card.querySelector('.action-card-top > span')?.textContent?.toLowerCase())).toEqual(expected.map((item) => item.id))
+  })
+
+  it('preserves the empty PatternDetailPage state for patterns without PP links', () => {
+    window.location.hash = '#/patterns/hpush'
+    render(<App />)
+
+    expect(screen.getByText('当前没有产后交叉动作')).toBeInTheDocument()
+    expect(document.querySelector('.action-card')).toBeNull()
+  })
+
+  it('closes all remaining App PP exact-ID legacy dependencies at the source boundary', () => {
+    expect(appSource).toContain('getPostpartumPresentationBridgeRecord')
+    expect(appSource).not.toMatch(/\bpostpartumMovements\b/)
+    expect(appSource).not.toMatch(/\bgetPostpartumMovement\b/)
+    expect(appSource).not.toMatch(/\bppMethodNodes\b|\bppMethodNodeById\b/)
+  })
+
   it('renders PP details as text content with an inline video and no coach-card image', () => {
     window.location.hash = '#/postpartum/pp01'
     render(<App />)
@@ -426,7 +487,7 @@ describe('7Fit V6 routing and shell', () => {
     expect(appSource).not.toMatch(/from ['"]\.\/data\/pp\/methodNodes['"]/
     )
     expect(appSource).not.toMatch(/\b(?:ppMethodNodeById|ppMethodNodes)\b/)
-    expect(appSource.match(/getPostpartumPresentationBridgeRecord/g)).toHaveLength(3)
+    expect(appSource.match(/getPostpartumPresentationBridgeRecord/g)).toHaveLength(6)
   })
 
   it('renders a separate female runtime section on the templates page with eight dedicated links', () => {
