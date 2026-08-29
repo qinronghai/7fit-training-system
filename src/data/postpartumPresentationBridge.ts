@@ -20,6 +20,7 @@ export type PPPostpartumPresentationBridgeIssueCode =
   | 'DUPLICATE_METHOD_SOURCE_ID'
   | 'MISSING_PRESENTATION_COUNTERPART'
   | 'MISSING_METHOD_COUNTERPART'
+  | 'ID_JOIN_MISMATCH'
   | 'SOURCE_ID_MISMATCH'
   | 'SOURCE_NAME_MISMATCH'
   | 'SOURCE_ORIGIN_MISMATCH'
@@ -222,6 +223,14 @@ const validateBridgeCatalog = (records: readonly Partial<PPPostpartumPresentatio
       issues.push(createIssue(
         'EXPANSION_NODE_PRESENT',
         `expansion node is not allowed in the bridge catalog: ${presentation.id} / ${methodNode.id}`,
+        { presentationId: presentation.id, methodNodeId: methodNode.id },
+      ))
+    }
+
+    if (presentation.id !== methodNode.id) {
+      issues.push(createIssue(
+        'ID_JOIN_MISMATCH',
+        `presentation and method node IDs must match: ${presentation.id} / ${methodNode.id}`,
         { presentationId: presentation.id, methodNodeId: methodNode.id },
       ))
     }

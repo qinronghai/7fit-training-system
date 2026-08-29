@@ -298,6 +298,30 @@ describe('PP-G1B2B postpartum presentation bridge', () => {
     })).toThrow(/method node source name mismatch: pp01/)
   })
 
+  it('reports an exact presentation-to-Method ID join mismatch independently of source metadata', () => {
+    const canonicalMismatch = validatePostpartumPresentationBridge([
+      {
+        presentation: postpartumMovements[0],
+        methodNode: ppMethodNodeById.get('pp02')!,
+      },
+    ])
+    expect(canonicalMismatch.some((issue) => issue.code === 'ID_JOIN_MISMATCH')).toBe(true)
+
+    const superficiallyConsistentMismatch = validatePostpartumPresentationBridge([
+      {
+        presentation: postpartumMovements[0],
+        methodNode: cloneMethodNode(ppMethodNodeById.get('pp02')!, {
+          source: {
+            ...ppMethodNodeById.get('pp02')!.source!,
+            sourceId: 'PP01',
+            sourceName: postpartumMovements[0].name,
+          },
+        }),
+      },
+    ])
+    expect(superficiallyConsistentMismatch.some((issue) => issue.code === 'ID_JOIN_MISMATCH')).toBe(true)
+  })
+
   it.each([
     [
       'duplicate presentation ids',
