@@ -4,8 +4,6 @@ import {
 } from './femaleProgrammingPolicy'
 import type {
   PPFemaleChallengeRole,
-  PPFemaleDemand,
-  PPFemaleEligibility,
   PPFemalePolicyEntry,
   PPFemaleSlot,
 } from './femaleProgrammingPolicy'
@@ -19,8 +17,9 @@ import {
 } from './femaleProgrammingTemplateRules'
 import { ppMethodNodeById } from './methodNodes'
 import type {
-  PPCanonicalMappingStatus,
+  PPCanonicalMapping,
   PPMethodNode,
+  PPMethodNodeId,
 } from './types'
 import type { Exercise } from '../exercises/types'
 
@@ -33,6 +32,16 @@ export type PPFemaleRuntimeResolutionErrorCode =
   | 'ADD_CANDIDATE_NOT_EXECUTABLE'
   | 'VERIFY_NOT_EXECUTABLE'
   | 'CANONICAL_EXERCISE_NOT_FOUND'
+
+export type PPFemaleRuntimeCanonicalBinding =
+  | {
+      mapping: Extract<PPCanonicalMapping, { status: 'mapped' }>
+      exercise: Exercise
+    }
+  | {
+      mapping: Extract<PPCanonicalMapping, { status: 'variant' }>
+      exercise: Exercise
+    }
 
 export class PPFemaleRuntimeResolutionError extends Error {
   readonly code: PPFemaleRuntimeResolutionErrorCode
@@ -57,24 +66,12 @@ export type PPFemaleRuntimeSlot = {
   challengeRole: PPFemaleChallengeRole
   methodNode: PPMethodNode
   policy: PPFemalePolicyEntry
-  canonicalExerciseId: Exercise['id']
-  canonicalExercise: Exercise
-  mappingStatus: PPCanonicalMappingStatus
-  variantId?: string
-  eligibility: PPFemaleEligibility
-  demand: PPFemaleDemand
-  breathing: PPMethodNode['breathing']
-  qualityGate: PPMethodNode['qualityGate']
-  commonCompensations: PPMethodNode['commonCompensations']
+  canonical: PPFemaleRuntimeCanonicalBinding
+  requiresConditionalReadiness: boolean
 }
 
 export type ResolvedFemaleProgrammingTemplate = {
-  id: PPFemaleTemplate['id']
-  code: PPFemaleTemplate['code']
-  name: PPFemaleTemplate['name']
-  intent: PPFemaleTemplate['intent']
-  coachNote?: PPFemaleTemplate['coachNote']
-  requiredConditionalNodeIds: PPFemaleTemplate['requiredConditionalNodeIds']
+  template: PPFemaleTemplate
   slots: Readonly<Record<PPFemaleSlot, PPFemaleRuntimeSlot>>
 }
 
@@ -84,43 +81,34 @@ const exerciseById = new Map(exercises.map((exercise) => [exercise.id, exercise]
 const fail = (
   code: PPFemaleRuntimeResolutionErrorCode,
   message: string,
-  template: PPFemaleTemplate,
-  nodeId?: string,
+  details: { templateId?: string; nodeId?: PPMethodNodeId } = {},
 ): never => {
   throw new PPFemaleRuntimeResolutionError(code, message, {
-    templateId: template.id,
-    nodeId,
+    ...details,
   })
 }
 
-const resolveCanonicalExercise = (
-  template: PPFemaleTemplate,
-  node: PPMethodNode,
-): { canonicalExerciseId: Exercise['id']; canonicalExercise: Exercise; mappingStatus: PPCanonicalMappingStatus; variantId?: string } => {
-  const mapping = node.mapping
-
+export const resolveFemaleRuntimeCanonicalBinding = (
+  mapping: PPCanonicalMapping,
+  details: { templateId?: string; nodeId?: PPMethodNodeId } = {},
+): PPFemaleRuntimeCanonicalBinding => {
   if (mapping.status === 'method-only') {
-    return fail('METHOD_ONLY_NOT_EXECUTABLE', `method-only node cannot be resolved into a runtime slot: ${node.id}`, template, node.id)
+    return fail('METHOD_ONLY_NOT_EXECUTABLE', 'method-only mapping cannot be resolved into an executable runtime slot', details)
   }
   if (mapping.status === 'add-candidate') {
-    return fail('ADD_CANDIDATE_NOT_EXECUTABLE', `add-candidate node cannot be resolved into a runtime slot: ${node.id}`, template, node.id)
+    return fail('ADD_CANDIDATE_NOT_EXECUTABLE', 'add-candidate mapping cannot be resolved into an executable runtime slot', details)
   }
   if (mapping.status === 'verify') {
-    return fail('VERIFY_NOT_EXECUTABLE', `verify node cannot be resolved into a runtime slot: ${node.id}`, template, node.id)
+    return fail('VERIFY_NOT_EXECUTABLE', 'verify mapping cannot be resolved into an executable runtime slot', details)
   }
 
-  const canonicalExerciseId = mapping.exerciseId
-  const canonicalExercise = exerciseById.get(canonicalExerciseId)
-  if (!canonicalExercise) {
-    return fail('CANONICAL_EXERCISE_NOT_FOUND', `canonical Exercise does not exist: ${node.id} -> ${canonicalExerciseId}`, template, node.id)
+  const exercise = exerciseById.get(mapping.exerciseId)
+  if (!exercise) {
+    return fail('CANONICAL_EXERCISE_NOT_FOUND', `canonical Exercise does not exist: ${mapping.exerciseId}`, details)
   }
 
-  return {
-    canonicalExerciseId,
-    canonicalExercise,
-    mappingStatus: mapping.status,
-    variantId: mapping.status === 'variant' ? mapping.variantId : undefined,
-  }
+  if (mapping.status === 'mapped') return { mapping, exercise }
+  return { mapping, exercise }
 }
 
 const resolveSlot = (
@@ -130,26 +118,31 @@ const resolveSlot = (
   const selection = template.selection[slot]
   const methodNode = ppMethodNodeById.get(selection.nodeId)
   if (!methodNode) {
-    return fail('METHOD_NODE_NOT_FOUND', `Method node does not exist: ${selection.nodeId}`, template, selection.nodeId)
+    return fail('METHOD_NODE_NOT_FOUND', `Method node does not exist: ${selection.nodeId}`, {
+      templateId: template.id,
+      nodeId: selection.nodeId,
+    })
   }
 
   const policy = policyByNodeId.get(selection.nodeId)
   if (!policy) {
-    return fail('POLICY_ENTRY_NOT_FOUND', `PP-F1 policy entry does not exist: ${selection.nodeId}`, template, selection.nodeId)
+    return fail('POLICY_ENTRY_NOT_FOUND', `PP-F1 policy entry does not exist: ${selection.nodeId}`, {
+      templateId: template.id,
+      nodeId: selection.nodeId,
+    })
   }
 
-  const canonical = resolveCanonicalExercise(template, methodNode)
+  const canonical = resolveFemaleRuntimeCanonicalBinding(methodNode.mapping, {
+    templateId: template.id,
+    nodeId: methodNode.id,
+  })
   return {
     slot,
     challengeRole: selection.challengeRole,
     methodNode,
     policy,
-    ...canonical,
-    eligibility: policy.eligibility,
-    demand: policy.demand,
-    breathing: methodNode.breathing,
-    qualityGate: methodNode.qualityGate,
-    commonCompensations: methodNode.commonCompensations,
+    canonical,
+    requiresConditionalReadiness: template.requiredConditionalNodeIds.includes(methodNode.id),
   }
 }
 
@@ -167,28 +160,23 @@ export const resolveFemaleProgrammingTemplate = (
     )
   }
 
+  const issues = validateFemaleProgrammingTemplate(template)
+  if (issues.length > 0) {
+    return fail(
+      'TEMPLATE_CONTRACT_INVALID',
+      `PP-F2A template contract is invalid: ${issues.map((item) => item.message).join('; ')}`,
+      { templateId: template.id },
+    )
+  }
+
   const slots = {
     HIP: resolveSlot(template, 'HIP'),
     SUPPORT: resolveSlot(template, 'SUPPORT'),
     CORE: resolveSlot(template, 'CORE'),
   } satisfies Record<PPFemaleSlot, PPFemaleRuntimeSlot>
 
-  const issues = validateFemaleProgrammingTemplate(template)
-  if (issues.length > 0) {
-    return fail(
-      'TEMPLATE_CONTRACT_INVALID',
-      `PP-F2A template contract is invalid: ${issues.map((item) => item.message).join('; ')}`,
-      template,
-    )
-  }
-
   return {
-    id: template.id,
-    code: template.code,
-    name: template.name,
-    intent: template.intent,
-    ...(template.coachNote ? { coachNote: template.coachNote } : {}),
-    requiredConditionalNodeIds: template.requiredConditionalNodeIds,
+    template,
     slots,
   }
 }
@@ -203,7 +191,7 @@ export const resolveFemaleProgrammingTemplates = (
     return fail(
       'TEMPLATE_CONTRACT_INVALID',
       `PP-F2A template catalog is invalid: ${issues.map((item) => item.message).join('; ')}`,
-      template,
+      { templateId: template.id },
     )
   }
   return templates.map(resolveFemaleProgrammingTemplate)

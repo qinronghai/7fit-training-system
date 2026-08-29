@@ -62,10 +62,12 @@ export type {
 } from './femaleProgrammingTemplateRules'
 export {
   PPFemaleRuntimeResolutionError,
+  resolveFemaleRuntimeCanonicalBinding,
   resolveFemaleProgrammingTemplate,
   resolveFemaleProgrammingTemplates,
 } from './femaleProgrammingRuntime'
 export type {
+  PPFemaleRuntimeCanonicalBinding,
   PPFemaleRuntimeResolutionErrorCode,
   PPFemaleRuntimeSlot,
   ResolvedFemaleProgrammingTemplate,
