@@ -17,6 +17,7 @@ import {
   buildPostpartumPresentationBridgeCatalog,
   getPostpartumPresentationBridgeRecord,
   postpartumPresentationBridgeCatalog,
+  type PPPostpartumPresentationRecord,
   validatePostpartumPresentationBridge,
 } from '../src/data/postpartumPresentationBridge'
 
@@ -30,7 +31,45 @@ const cloneMethodNode = (methodNode: PPMethodNode, overrides: Partial<PPMethodNo
   coachNotes: methodNode.coachNotes ? [...methodNode.coachNotes] : methodNode.coachNotes,
 })
 
+const extractModuleSpecifiers = (source: string): string[] => {
+  const patterns = [
+    /\bimport\s+(?:(?:type)\s+)?(?:[^'";]+?\sfrom\s+)?['"]([^'"]+)['"]/g,
+    /\bexport\s+(?:type\s+)?[^'";]+?\sfrom\s+['"]([^'"]+)['"]/g,
+    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  ]
+
+  return patterns.flatMap((pattern) => Array.from(source.matchAll(pattern), ([, specifier]) => specifier))
+}
+
+const allowedBridgeModuleSpecifiers = new Set([
+  './postpartumPresentationData',
+  './pp/methodNodes',
+  './pp/types',
+])
+
+const forbiddenBridgeDependency = /(?:^|\/)(?:programming|exercises|pp)(?:\/|$)|legacyTemplateContent|template-copy|(?:^|\/)(?:App|router|storage)(?:\/|$)|femaleProgramming|(?:^|\/)(?:f1|f2|g1a)(?:[-_/]|$)|(?:female)?(?:runtimeAdapter|runtimeAppSurface)/i
+
+const assertReadonlyBridgeRecord = (record: PPPostpartumPresentationRecord): void => {
+  // @ts-expect-error bridge presentation references are readonly
+  record.presentation = record.presentation
+  // @ts-expect-error bridge Method references are readonly
+  record.methodNode = record.methodNode
+}
+
 describe('PP-G1B2B postpartum presentation bridge', () => {
+  it('extracts normal, side-effect, export-from, and dynamic import specifiers', () => {
+    expect(extractModuleSpecifiers(`
+      import './side-effect'
+      import type { Thing } from './normal'
+      export { Thing } from './re-export'
+      const load = () => import('./dynamic')
+    `)).toEqual(['./side-effect', './normal', './re-export', './dynamic'])
+  })
+
+  it('exposes shallow-frozen bridge roots with readonly source fields', () => {
+    expect(assertReadonlyBridgeRecord).toBeTypeOf('function')
+  })
+
   it('builds the 26-record bridge catalog with exact PP01–PP26 coverage and no expansion nodes', () => {
     expect(postpartumPresentationBridgeCatalog).toHaveLength(26)
 
@@ -130,8 +169,19 @@ describe('PP-G1B2B postpartum presentation bridge', () => {
     expect(getPostpartumPresentationBridgeRecord('pp01')).toBe(postpartumPresentationBridgeCatalog[0])
     expect(getPostpartumPresentationBridgeRecord('pp26')).toBe(postpartumPresentationBridgeCatalog.at(-1))
     expect(getPostpartumPresentationBridgeRecord('missing-id')).toBeUndefined()
+  })
+
+  it('freezes only the bridge catalog and roots, not representative source objects', () => {
+    const presentationSource = postpartumMovements.find((presentation) => presentation.id === 'pp01')!
+    const methodSource = ppMethodNodeById.get('pp01')!
+    const pp01 = getPostpartumPresentationBridgeRecord('pp01')!
+
+    expect(Object.isFrozen(presentationSource)).toBe(false)
+    expect(Object.isFrozen(methodSource)).toBe(false)
     expect(Object.isFrozen(postpartumPresentationBridgeCatalog)).toBe(true)
-    expect(Object.isFrozen(postpartumPresentationBridgeCatalog[0])).toBe(true)
+    expect(Object.isFrozen(pp01)).toBe(true)
+    expect(pp01.presentation).toBe(presentationSource)
+    expect(pp01.methodNode).toBe(methodSource)
   })
 
   it('keeps the content compatibility exports reference-identical to the pure Presentation leaf', () => {
@@ -155,11 +205,19 @@ describe('PP-G1B2B postpartum presentation bridge', () => {
   })
 
   it('keeps the bridge and Presentation data leaf within their import boundaries', () => {
-    expect(bridgeSource).not.toMatch(/from ['"]\.\/content['"]|from ['"]\.\/exercises(?:['"]|\/)|from ['"]\.\/programming(?:['"]|\/)/)
-    expect(bridgeSource).not.toMatch(/from ['"]\.\/pp\/(?!methodNodes['"]|types['"])/)
-    expect(bridgeSource).not.toMatch(/from ['"][^'"]*(?:femaleProgrammingPolicy|femaleProgrammingRules|femaleProgrammingTemplates|femaleProgrammingRuntime|App|router|storage|template-copy)/)
-    expect(leafSource).not.toMatch(/^\s*import\s/m)
-    expect(leafSource).not.toMatch(/from ['"][^'"]*(?:programming|exercises|pp\/|App|router|storage|template-copy)/)
+    const bridgeModuleSpecifiers = extractModuleSpecifiers(bridgeSource)
+    const leafModuleSpecifiers = extractModuleSpecifiers(leafSource)
+
+    expect(bridgeModuleSpecifiers).toEqual(expect.arrayContaining([
+      './postpartumPresentationData',
+      './pp/methodNodes',
+      './pp/types',
+    ]))
+    expect(bridgeModuleSpecifiers.every((specifier) => allowedBridgeModuleSpecifiers.has(specifier))).toBe(true)
+    expect([...bridgeModuleSpecifiers, ...leafModuleSpecifiers]
+      .filter((specifier) => !allowedBridgeModuleSpecifiers.has(specifier))
+      .some((specifier) => forbiddenBridgeDependency.test(specifier))).toBe(false)
+    expect(leafModuleSpecifiers).toEqual([])
   })
 
   it.each([

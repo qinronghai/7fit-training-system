@@ -4,8 +4,8 @@ import type { ActionEntity } from './postpartumPresentationData'
 import type { PPMethodNode } from './pp/types'
 
 export type PPPostpartumPresentationRecord = {
-  presentation: ActionEntity
-  methodNode: PPMethodNode
+  readonly presentation: ActionEntity
+  readonly methodNode: PPMethodNode
 }
 
 export type PPPostpartumPresentationBridgeSources = {
