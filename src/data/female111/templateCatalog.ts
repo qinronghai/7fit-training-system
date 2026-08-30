@@ -1,6 +1,10 @@
 import { getExercise } from '../exercises'
 import { female111RecipeFamilies } from './blockRecipes'
 import { female111ProgressionFamilies } from './progression'
+import {
+  estimateFemale111TemplateMinutes,
+  validateFemale111TemplateLevel,
+} from './templateRules'
 import type {
   Female111RecoveryRecord,
   Female111Template,
@@ -188,43 +192,15 @@ const recoveryRecord = (recipeId: string, level: Female111TemplateLevelId): Fema
   required: true,
   fields: ['readiness', 'pain', 'breathing', 'primaryQuality', 'nextProgression'],
   coachPrompt: '记录主动作质量、疼痛/压力反应、呼吸连续性和下一次是否可升级。',
+  durationSeconds: seconds(60, 90),
 })
 
-const estimateSecondsForCount = (value: number | { min: number; max: number } | undefined) => {
-  if (typeof value === 'number') return seconds(value, value)
-  if (value) return value
-  return seconds(0, 0)
-}
-
-const sumSeconds = (items: readonly (Female111TemplatePrep | Female111TemplateRampUp | Female111TemplateAction)[]) => (
-  items.reduce((total, item) => {
-    const rest = estimateSecondsForCount(item.restSeconds)
-    const transition = estimateSecondsForCount(item.transitionAfterSeconds)
-    return {
-      min: total.min + item.planningExecutionSeconds.min + rest.min + transition.min,
-      max: total.max + item.planningExecutionSeconds.max + rest.max + transition.max,
-    }
-  }, seconds(0, 0))
-)
-
 const withCalculatedTime = (definition: Female111TemplateLevelDefinition): Female111TemplateLevel => {
-  const estimatedSeconds = sumSeconds([
-    ...definition.prep,
-    ...definition.rampUp,
-    ...definition.mainSequence,
-    ...definition.optionalAccessory,
-  ])
-  const estimatedMinutes = {
-    min: Math.ceil(estimatedSeconds.min / 60),
-    max: Math.ceil(estimatedSeconds.max / 60),
-  }
+  const timeEstimate = estimateFemale111TemplateMinutes(definition, { includeOptional: true })
   return {
     ...definition,
-    estimatedMinutes,
-    timeEstimate: {
-      estimatedMinutes,
-      source: 'calculated-from-template-items',
-    },
+    estimatedMinutes: timeEstimate.totalMinutes,
+    timeEstimate,
   }
 }
 
@@ -803,7 +779,7 @@ export const female111TemplateCatalog: readonly Female111TemplateCatalogEntry[] 
   }
 })
 
-const allLevelActions = (level: Female111TemplateLevel) => [
+const allLevelActions = (level: Female111TemplateLevelDefinition) => [
   ...level.prep,
   ...level.rampUp,
   ...level.mainSequence,
@@ -882,6 +858,24 @@ const validateCatalog = () => {
         const previousLevelId = female111TemplateLevelIds[female111TemplateLevelIds.indexOf(levelId) - 1]
         validateExerciseProgression(template, level, template.levels[previousLevelId])
       }
+      const validationIssues = validateFemale111TemplateLevel(
+        level,
+        levelId === 'l1' ? undefined : template.levels[female111TemplateLevelIds[female111TemplateLevelIds.indexOf(levelId) - 1]],
+      )
+      if (validationIssues.length > 0) {
+        throw new Error(
+          `Female111 template contract failed: ${template.recipeId}/${levelId} ${validationIssues.map((issue) => `${issue.code}@${issue.path}`).join(', ')}`,
+        )
+      }
+      const estimated = estimateFemale111TemplateMinutes(level, { includeOptional: true })
+      if (
+        level.estimatedMinutes.min !== estimated.totalMinutes.min
+        || level.estimatedMinutes.max !== estimated.totalMinutes.max
+        || level.timeEstimate.totalMinutes.min !== estimated.totalMinutes.min
+        || level.timeEstimate.totalMinutes.max !== estimated.totalMinutes.max
+      ) {
+        throw new Error(`Female111 template level must publish estimator-derived minutes: ${template.recipeId}/${levelId}`)
+      }
       for (const item of allLevelActions(level)) {
         if (!getExercise(item.exerciseId)) throw new Error(`Female111 template references an unknown Exercise: ${item.exerciseId}`)
         if (typeof item.prescription !== 'object' || item.prescription === null) {
@@ -894,6 +888,25 @@ const validateCatalog = () => {
 
 validateCatalog()
 
+const materializeLevel = (
+  level: Female111TemplateLevel,
+  previousLevel?: Female111TemplateLevel,
+): Female111TemplateLevel => {
+  const validationIssues = validateFemale111TemplateLevel(level, previousLevel)
+  if (validationIssues.length > 0) {
+    throw new Error(
+      `Female111 template catalog contract failed for ${level.recipeId}/${level.level}: ${validationIssues.map((issue) => `${issue.code}@${issue.path}`).join(', ')}`,
+    )
+  }
+
+  const timeEstimate = estimateFemale111TemplateMinutes(level, { includeOptional: true })
+  return {
+    ...level,
+    estimatedMinutes: timeEstimate.totalMinutes,
+    timeEstimate,
+  }
+}
+
 export const getFemale111Template = (
   recipeId: string,
   level: Female111TemplateLevelId = 'l1',
@@ -902,10 +915,14 @@ export const getFemale111Template = (
   const recipe = recipeById.get(recipeId)
   const selectedLevel = catalogEntry?.levels[level]
   if (!catalogEntry || !recipe || !selectedLevel) return undefined
+  const previousLevel = level === 'l1'
+    ? undefined
+    : catalogEntry.levels[female111TemplateLevelIds[female111TemplateLevelIds.indexOf(level) - 1]]
+  const materializedLevel = materializeLevel(selectedLevel, previousLevel)
   return {
-    ...compatibilityProjection(selectedLevel),
+    ...compatibilityProjection(materializedLevel),
     recipe,
     recipeId,
-    level: selectedLevel,
+    level: materializedLevel,
   }
 }

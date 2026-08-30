@@ -98,7 +98,15 @@ export type {
   Female111TemplatePrep,
   Female111TemplateRampUp,
   Female111TemplateRole,
+  Female111TemplateTimeComponents,
+  Female111TemplateTimeEstimate,
+  Female111TemplateValidationIssue,
+  Female111TemplateValidationIssueCode,
 } from './templateTypes'
+export {
+  estimateFemale111TemplateMinutes,
+  validateFemale111TemplateLevel,
+} from './templateRules'
 export { validateFemale111Block } from './blockRules'
 export { resolveFemale111Block } from './blockResolver'
 export { composeFemale111Session } from './sessionComposer'

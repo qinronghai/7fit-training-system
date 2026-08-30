@@ -56,6 +56,7 @@ export type Female111RecoveryRecord = {
   required: true
   fields: readonly ('readiness' | 'pain' | 'breathing' | 'primaryQuality' | 'nextProgression')[]
   coachPrompt: string
+  durationSeconds: NumericRange
 }
 
 export type Female111TemplateLevelDefinition = {
@@ -72,14 +73,48 @@ export type Female111TemplateLevelDefinition = {
   coachNote: string
 }
 
+export type Female111TemplateTimeComponents = {
+  prepSeconds: NumericRange
+  rampUpSeconds: NumericRange
+  mainWorkSeconds: NumericRange
+  setRestSeconds: NumericRange
+  transitionSeconds: NumericRange
+  unilateralAdjustmentSeconds: NumericRange
+  equipmentCoachBufferSeconds: NumericRange
+  optionalSeconds: NumericRange
+  recoverySeconds: NumericRange
+  totalSeconds: NumericRange
+}
+
 export type Female111TemplateTimeEstimate = {
-  estimatedMinutes: NumericRange
-  source: 'calculated-from-template-items'
+  components: Female111TemplateTimeComponents
+  totalMinutes: NumericRange
+  optionalIncluded: boolean
 }
 
 export type Female111TemplateLevel = Female111TemplateLevelDefinition & {
   estimatedMinutes: NumericRange
   timeEstimate: Female111TemplateTimeEstimate
+}
+
+export type Female111TemplateValidationIssueCode =
+  | 'DUPLICATE_PREP_PHASE'
+  | 'MAIN_SEQUENCE_TOO_SHORT'
+  | 'MISSING_PREP_PHASE'
+  | 'OPTIONAL_TIME_GATE'
+  | 'PRESCRIPTION_MISSING'
+  | 'PROGRESSION_MISSING'
+  | 'PROGRESSION_TOO_MANY_VARIABLES'
+  | 'QUALITY_BOUNDARY_MISSING'
+  | 'REGRESSION_MISSING'
+  | 'REPEATED_HIGH_FATIGUE_SOURCE'
+  | 'ROLE_COVERAGE'
+  | 'UNKNOWN_EXERCISE'
+
+export type Female111TemplateValidationIssue = {
+  code: Female111TemplateValidationIssueCode
+  path: string
+  message: string
 }
 
 export type Female111TemplateCompatibilityAction = {

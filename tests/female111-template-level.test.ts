@@ -65,6 +65,18 @@ describe('PP-F111 template level catalog', () => {
     }
   })
 
+  it('keeps the public accessor stable while publishing estimator-derived minutes', () => {
+    for (const recipe of female111RecipeFamilies) {
+      for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
+        const selected = getFemale111Template(recipe.id, level)!
+        expect(selected.recipeId).toBe(recipe.id)
+        expect(selected.level.level).toBe(level)
+        expect(selected.level.estimatedMinutes).toEqual(selected.level.timeEstimate.totalMinutes)
+        expect(selected.level.estimatedMinutes.max).toBeLessThanOrEqual(60)
+      }
+    }
+  })
+
   it('records primary exercise replacements through the Female111 progression graph', () => {
     for (const recipe of female111RecipeFamilies) {
       let previousPrimary = getFemale111Template(recipe.id, 'l1')!.level.mainSequence.find((item) => item.role === 'PRIMARY')!
