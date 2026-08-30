@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { App } from '../src/App'
 import appSource from '../src/App.tsx?raw'
+import { getLibraryAction, librarySections } from '../src/data/content'
 import { getRoute } from '../src/lib/router'
 
 afterEach(() => {
@@ -70,6 +71,40 @@ describe('PP-F111-C7 Chinese coach product integration', () => {
     expect(l4).toHaveAttribute('href', '#/templates/female111/F111-03/l4')
     fireEvent.click(l4)
     expect(getRoute()).toEqual({ name: 'female111-template-detail', recipeId: 'F111-03', level: 'l4' })
+  })
+
+  it('resolves every rendered PPF111 action link to an existing route target', () => {
+    const recipeIds = Array.from({ length: 8 }, (_, index) => `F111-0${index + 1}`)
+    const levels = ['l1', 'l2', 'l3', 'l4'] as const
+    const validLibrarySectionIds = new Set(librarySections.map((section) => section.id))
+
+    for (const recipeId of recipeIds) {
+      for (const level of levels) {
+        window.location.hash = `#/templates/female111/${recipeId}/${level}`
+        const view = render(<App />)
+        const actionLinks = screen.getAllByRole('link', { name: /查看动作详情/ })
+        expect(actionLinks.length).toBeGreaterThanOrEqual(9)
+
+        for (const link of actionLinks) {
+          const href = link.getAttribute('href')
+          expect(href).toMatch(/^#\/library/)
+          const route = getRoute(href ?? '')
+          if (route.name === 'action-detail') {
+            expect(getLibraryAction(route.id)).toBeDefined()
+          } else if (route.name === 'library-detail') {
+            expect(validLibrarySectionIds.has(route.id)).toBe(true)
+          } else {
+            throw new Error(`Unexpected PPF111 action route: ${href}`)
+          }
+        }
+
+        view.unmount()
+      }
+    }
+  })
+
+  it('does not parse a level-only Female111 template hash as a recipe detail', () => {
+    expect(getRoute('#/templates/female111/l4')).toEqual({ name: 'female111-template' })
   })
 
   it('renders the PPF111 template before entering the daily coaching workbench', () => {

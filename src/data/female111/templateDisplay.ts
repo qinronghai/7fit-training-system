@@ -1,5 +1,5 @@
-import { getLibraryActionsByExerciseId } from '../content'
-import { exerciseDisplayCategoryLabels, getExercise, type Exercise } from '../exercises'
+import { getLibraryActionsByExerciseId, librarySections } from '../content'
+import { exerciseDisplayCategoryLabels, getExercise, type Exercise, type ExerciseDisplayCategoryId } from '../exercises'
 import type { Count, ExercisePrescription, NumericRange } from '../programming/types'
 import type {
   Female111TemplateAction,
@@ -9,6 +9,21 @@ import type {
 } from './templateTypes'
 
 type Female111DisplayAction = Female111TemplatePrep | Female111TemplateRampUp | Female111TemplateAction
+type LibrarySectionId = (typeof librarySections)[number]['id']
+
+const fallbackLibrarySectionByDisplayCategory: Readonly<Record<ExerciseDisplayCategoryId, LibrarySectionId>> = {
+  lower: 'lower',
+  glute: 'lower',
+  pull: 'pull',
+  push: 'push',
+  shoulder: 'push',
+  arms: 'push',
+  core: 'core',
+  carry: 'functional',
+  power: 'functional',
+  conditioning: 'cardio',
+  mobility: 'multiplanar',
+}
 
 const countText = (value: Count | undefined): string | undefined => {
   if (value === undefined) return undefined
@@ -66,7 +81,7 @@ export const getFemale111ExerciseDisplay = (exerciseId: string): {
     category: exerciseDisplayCategoryLabels[exercise.displayCategoryId],
     equipment: exercise.equipment.join(' / '),
     techniqueLevel: exercise.techniqueLevel.toUpperCase(),
-    libraryHref: libraryAction ? `#/library/action/${libraryAction.id}` : `#/library/${exercise.displayCategoryId}`,
+    libraryHref: libraryAction ? `#/library/action/${libraryAction.id}` : `#/library/${fallbackLibrarySectionByDisplayCategory[exercise.displayCategoryId]}`,
   }
 }
 

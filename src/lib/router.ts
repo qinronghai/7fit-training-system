@@ -16,10 +16,11 @@ export type Route =
 export type TemplateRouteLevel = 'l1' | 'l2' | 'l3' | 'l4'
 
 const validLevels = new Set(['l1', 'l2', 'l3', 'l4'])
+const female111RecipeIdPattern = /^F111-\d{2}$/i
 
 export const getRoute = (hash = window.location.hash): Route => {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
-  if (parts[0] === 'templates' && parts[1] === 'female111' && parts[2]) {
+  if (parts[0] === 'templates' && parts[1] === 'female111' && parts[2] && female111RecipeIdPattern.test(parts[2])) {
     return {
       name: 'female111-template-detail',
       recipeId: parts[2].toUpperCase(),
