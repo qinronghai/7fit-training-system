@@ -2,6 +2,24 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, Check, ChevronRight, Copy, ExternalLink, Heart, Moon, Search, ShieldAlert, Sun } from 'lucide-react'
 import { getLibraryAction, getLibraryActionId, getPattern, getTemplate, librarySections, movementPatterns, templates, type ActionEntity, type Level, type Template } from './data/content'
 import { resolveFemaleProgrammingTemplates } from './data/pp'
+import {
+  female111RecipeFamilies,
+  female111TemplateCatalog,
+  female111TemplateLevelIds,
+  formatFemale111ActionPrescription,
+  formatFemale111Range,
+  formatFemale111Rest,
+  getFemale111CoachFamilyLabel,
+  getFemale111CoachRecipeDisplay,
+  getFemale111ExerciseDisplay,
+  getFemale111Template,
+  getFemale111TemplateRoleLabel,
+  type Female111TemplateAction,
+  type Female111TemplateLevel,
+  type Female111TemplatePrep,
+  type Female111TemplateRampUp,
+} from './data/female111'
+import { Female111CoachProduct, Female111TemplatePage } from './components/Female111CoachProduct'
 import { getPostpartumPresentationBridgeRecord, postpartumPresentationBridgeCatalog } from './data/postpartumPresentationBridge'
 import { getRoute, navigate, type Route } from './lib/router'
 import { addRecent, getFavorites, getRecent, toggleFavorite } from './lib/storage'
@@ -56,7 +74,7 @@ const BottomNav = ({ route }: { route: Route }) => {
   ] as const
   return <nav className="bottom-nav" aria-label="主导航">
     {items.map(([name, label, href]) => {
-      const active = route.name.startsWith(name) || (name === 'templates' && route.name === 'female-template-detail')
+      const active = route.name.startsWith(name) || (name === 'templates' && (route.name === 'female-template-detail' || route.name === 'female111-template' || route.name === 'female111-template-detail'))
       return <a className={active ? 'active' : ''} href={href} key={name}>{label}</a>
     })}
   </nav>
@@ -67,7 +85,10 @@ const RouteView = ({ route }: { route: Route }) => {
     case 'home': return <HomePage />
     case 'templates': return <TemplatesPage />
     case 'template-detail': return <TemplateDetailPage id={route.system} level={route.level} />
+    case 'female111-template': return <Female111TemplatePage />
+    case 'female111-template-detail': return <Female111RecipeDetailPage recipeId={route.recipeId} level={route.level} />
     case 'female-template-detail': return <FemaleTemplateDetailPage id={route.id} />
+    case 'female111': return <Female111CoachPage />
     case 'patterns': return <PatternsPage />
     case 'pattern-detail': return <PatternDetailPage id={route.id} />
     case 'library': return <LibraryPage />
@@ -117,11 +138,116 @@ const TemplatesPage = () => {
   const [query, setQuery] = useState('')
   const [system, setSystem] = useState<'all' | Template['system']>('all')
   const filtered = templates.filter((template) => (system === 'all' || template.system === system) && `${template.code} ${template.name} ${template.description}`.toLowerCase().includes(query.toLowerCase()))
-  return <div className="page"><PageTitle eyebrow="TRAINING TEMPLATES" title="训练模板" description="先选训练体系，再选模板与 L1–L4 方案等级。三大体系同级，不互相附加。" /><SearchBox value={query} onChange={setQuery} placeholder="搜索模板名称或目标" /><div className="filter-row"><Pill active={system === 'all'} onClick={() => setSystem('all')}>全部 · 16</Pill><Pill active={system === '3c'} onClick={() => setSystem('3c')}>3C · 6</Pill><Pill active={system === 'body'} onClick={() => setSystem('body')}>BODY · 5</Pill><Pill active={system === 'conditioning'} onClick={() => setSystem('conditioning')}>体能 · 5</Pill></div><div className="template-grid">{filtered.map((template) => <TemplateCard key={template.id} template={template} />)}</div><section className="section-block"><SectionHeading title="女性 1+1+1" action={<span className="muted">8 个模板</span>} /><div className="template-grid">{femaleRuntimeTemplates.map((template) => <FemaleTemplateCard key={template.template.id} template={template} />)}</div></section></div>
+  return <div className="page"><PageTitle eyebrow="TRAINING TEMPLATES" title="训练模板" description="先选训练体系，再选模板与 L1–L4 方案等级。三大体系同级，不互相附加。" /><SearchBox value={query} onChange={setQuery} placeholder="搜索模板名称或目标" /><div className="filter-row"><Pill active={system === 'all'} onClick={() => setSystem('all')}>全部 · 16</Pill><Pill active={system === '3c'} onClick={() => setSystem('3c')}>3C · 6</Pill><Pill active={system === 'body'} onClick={() => setSystem('body')}>BODY · 5</Pill><Pill active={system === 'conditioning'} onClick={() => setSystem('conditioning')}>体能 · 5</Pill></div><div className="template-grid">{filtered.map((template) => <TemplateCard key={template.id} template={template} />)}</div><section className="section-block"><SectionHeading title="女性 1+1+1" action={<span className="muted">PPF111 · <span>8 个编排模板</span></span>} /><a className="template-card female111-template-card" href="#/templates/female111"><div className="template-badge female111">PPF111</div><h3>PPF111 · 女性 1+1+1</h3><p>正式训练体系：PREP、两个训练块、可选辅助与恢复记录。</p><div className="card-footer"><span>进入模板总览</span><ChevronRight size={17} /></div></a><div className="female111-catalog-heading"><div><b>PPF111 编排模板</b><span>每个模板定义一个主训练挑战，再配支持与核心控制。</span></div><span>8 个编排模板</span></div><div className="template-grid female111-recipe-grid">{female111RecipeFamilies.map((recipe) => <Female111RecipeCard key={recipe.id} recipe={recipe} />)}</div><details className="female111-legacy-catalog"><summary>兼容入口：旧版 Female FIT-F01–F08</summary><div className="template-grid">{femaleRuntimeTemplates.map((template) => <FemaleTemplateCard key={template.template.id} template={template} />)}</div></details></section></div>
 }
 
 const TemplateCard = ({ template }: { template: Template }) => <a className="template-card" href={`#/templates/${template.id}/l1`}><div className={`template-badge ${template.system}`}>{template.code}</div><h3>{template.name}</h3><p>{template.description}</p><div className="card-footer"><span>4 个方案等级</span><ChevronRight size={17} /></div></a>
 const FemaleTemplateCard = ({ template }: { template: FemaleRuntimeTemplate }) => <a className="template-card" href={`#/female/${template.template.id}`}><div className="template-badge body">{template.template.code}</div><h3>{template.template.name}</h3><p>{template.template.intent}</p><div className="card-footer"><span>HIP · SUPPORT · CORE</span><ChevronRight size={17} /></div></a>
+const Female111RecipeCard = ({ recipe }: { recipe: (typeof female111RecipeFamilies)[number] }) => {
+  const display = getFemale111CoachRecipeDisplay(recipe)
+  return <a className="template-card female111-recipe-card" href={`#/templates/female111/${recipe.id}`}><div className="template-badge female111">{recipe.id}</div><h3>{display.name}</h3><p>{display.rationale}</p><div className="female111-recipe-family-row"><span>主训练 · {getFemale111CoachFamilyLabel(recipe.primaryFamily)}</span><span>支持 · {getFemale111CoachFamilyLabel(recipe.supportFamily)}</span><span>核心 · {getFemale111CoachFamilyLabel(recipe.coreFamily)}</span></div><div className="card-footer"><span>查看动作模板</span><ChevronRight size={17} /></div></a>
+}
+
+const female111PrepPhaseLabels: Record<Female111TemplatePrep['phase'], string> = {
+  R: 'R · 提升',
+  M: 'M · 活动',
+  A: 'A · 激活',
+  P: 'P · 专项',
+}
+
+const female111RecoveryFieldLabels: Record<Female111TemplateLevel['recoveryRecord']['fields'][number], string> = {
+  readiness: '准备度',
+  pain: '疼痛 / 压力反应',
+  breathing: '呼吸连续性',
+  primaryQuality: '主动作质量',
+  nextProgression: '下次进退阶',
+}
+
+const female111TimeLabel = (range: { min: number; max: number }) => formatFemale111Range({
+  min: Math.round(range.min / 60),
+  max: Math.ceil(range.max / 60),
+}, ' 分钟')
+
+const Female111RecipeDetailPage = ({ recipeId, level }: { recipeId: string; level: 'l1' | 'l2' | 'l3' | 'l4' }) => {
+  const template = getFemale111Template(recipeId, level)
+  const catalogEntry = female111TemplateCatalog.find((item) => item.recipeId === recipeId)
+  const recipe = female111RecipeFamilies.find((item) => item.id === recipeId)
+  if (!template || !recipe || !catalogEntry) return <EmptyRoute title="PPF111 模板不存在" href="#/templates" />
+  const display = getFemale111CoachRecipeDisplay(recipe)
+  const current = template.level
+  const allActions = [
+    ...current.prep,
+    ...current.rampUp,
+    ...current.mainSequence,
+    ...current.optionalAccessory,
+  ]
+  const primary = current.mainSequence.find((action) => action.role === 'PRIMARY')
+  return <div className="page detail-page female111-recipe-detail-page">
+    <div className="sticky-context"><a href="#/templates/female111"><ArrowLeft size={16} /> PPF111 模板</a><span>{recipe.id} / 当前 {level.toUpperCase()}</span><a href={`#/templates/female111/${recipe.id}/${level === 'l4' ? 'l1' : `l${Number(level.slice(1)) + 1}`}`} aria-label="下一个 PPF111 方案等级"><ArrowRight size={16} /></a></div>
+    <div className="detail-title"><Eyebrow>PPF111 · 完整课程 · {recipe.id}</Eyebrow><h1>{recipe.id} · {display.name}</h1><p>{display.rationale}</p><div className="tag-row"><Pill>当前 {level.toUpperCase()}</Pill><Pill>{current.focus}</Pill><Pill>{female111TimeLabel(current.timeEstimate.components.totalSeconds)}</Pill></div></div>
+    <div className="level-tabs" role="tablist" aria-label="PPF111 方案等级">{female111TemplateLevelIds.map((item) => <a role="tab" aria-selected={level === item} className={level === item ? 'active' : ''} href={`#/templates/female111/${recipe.id}/${item}`} onClick={(event) => { event.preventDefault(); navigate(`templates/female111/${recipe.id}/${item}`) }} key={item}><b>{item.toUpperCase()}</b><small>{catalogEntry.levels[item].focus}</small></a>)}</div>
+    <div className="quick-actions"><button onClick={() => navigate(primary ? getFemale111ExerciseDisplay(primary.exerciseId).libraryHref.replace(/^#\//, '') : 'library')}><ExternalLink size={17} />主动作详情</button><button onClick={() => navigate('library')}><Search size={17} />动作库</button><button onClick={() => navigate('female111')}><ChevronRight size={17} />今日编课</button></div>
+    <section className="coach-callout"><ShieldAlert size={19} /><div><b>训练原则</b><p>这是静态完整课程页：动作、处方和进退阶来自 PPF111 结构化模板；实际会员方案仍需进入今日编课，由准备度、场地和教练确认决定。</p></div></section>
+    <section className="workout-section">
+      <SectionHeading title="R/M/A/P 动作准备" action={<span className="muted">{current.prep.length} 个阶段</span>} />
+      <div className="warmup-grid female111-prep-grid">{current.prep.map((action, index) => <Female111PrepCard key={action.id} action={action} index={index} />)}</div>
+    </section>
+    <section className="workout-section">
+      <SectionHeading title="专项渐进热身" action={<span className="muted">{current.rampUp.length} 组递进</span>} />
+      <div className="female111-ramp-grid">{current.rampUp.map((action) => <Female111RampCard key={action.id} action={action} />)}</div>
+    </section>
+    <section className="workout-section">
+      <SectionHeading title="主训练序列" action={<span className="muted">{current.mainSequence.length} 个动作</span>} />
+      <div className="exercise-stack">{current.mainSequence.map((action, index) => <Female111MainActionCard key={action.id} action={action} index={index} />)}</div>
+    </section>
+    <section className="workout-section">
+      <SectionHeading title="可选辅助" action={<span className="muted">教练条件触发</span>} />
+      <div className="female111-optional-grid">{current.optionalAccessory.map((action) => <Female111OptionalCard key={action.id} action={action} />)}</div>
+    </section>
+    <section className="female111-recovery-record">
+      <div><Eyebrow>RECOVERY RECORD</Eyebrow><h2>恢复记录</h2><p>{current.recoveryRecord.coachPrompt}</p></div>
+      <div className="tag-row">{current.recoveryRecord.fields.map((field) => <Pill key={field}>{female111RecoveryFieldLabels[field]}</Pill>)}</div>
+      <span>{female111TimeLabel(current.recoveryRecord.durationSeconds)}</span>
+    </section>
+    <section className="metrics-row female111-time-breakdown">
+      <div><small>课程总时长</small><b>{female111TimeLabel(current.timeEstimate.components.totalSeconds)}</b></div>
+      <div><small>准备 + 渐进</small><b>{female111TimeLabel({ min: current.timeEstimate.components.prepSeconds.min + current.timeEstimate.components.rampUpSeconds.min, max: current.timeEstimate.components.prepSeconds.max + current.timeEstimate.components.rampUpSeconds.max })}</b></div>
+      <div><small>主序列工作</small><b>{female111TimeLabel(current.timeEstimate.components.mainWorkSeconds)}</b></div>
+      <div><small>组间休息</small><b>{female111TimeLabel(current.timeEstimate.components.setRestSeconds)}</b></div>
+      <div><small>辅助影响</small><b>{female111TimeLabel(current.timeEstimate.components.optionalSeconds)}</b></div>
+      <div><small>记录与恢复</small><b>{female111TimeLabel(current.timeEstimate.components.recoverySeconds)}</b></div>
+    </section>
+    <details className="template-coach-note" open><summary>教练提示</summary><p>{current.coachNote}</p></details>
+    <section className="workout-section">
+      <SectionHeading title="动作库索引" action={<span className="muted">{allActions.length} 个动作链接</span>} />
+      <div className="warmup-grid female111-library-grid">{allActions.map((action, index) => {
+        const displayAction = getFemale111ExerciseDisplay(action.exerciseId)
+        return <a className="warmup-action" href={displayAction.libraryHref} aria-label={`查看动作详情：${displayAction.name}`} key={`${action.id}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{displayAction.name}</b><small>{displayAction.category} · {formatFemale111ActionPrescription(action)}</small></div><ChevronRight size={15} aria-hidden="true" /></a>
+      })}</div>
+    </section>
+    <div className="female111-form-actions"><a className="text-action" href="#/templates/female111"><ArrowLeft size={16} />返回 PPF111 总览</a><a className="primary-button" href="#/female111">进入今日编课 <ChevronRight size={17} /></a></div>
+  </div>
+}
+
+const Female111PrepCard = ({ action, index }: { action: Female111TemplatePrep; index: number }) => {
+  const display = getFemale111ExerciseDisplay(action.exerciseId)
+  return <a className="warmup-action female111-prep-action" href={display.libraryHref} aria-label={`查看动作详情：${display.name}`}><span>{female111PrepPhaseLabels[action.phase]}</span><div><b>{display.name}</b><small>{display.category} · {formatFemale111ActionPrescription(action)}</small><small>{action.reason}</small></div><ChevronRight size={15} aria-hidden="true" /><small className="female111-action-index">0{index + 1}</small></a>
+}
+
+const Female111RampCard = ({ action }: { action: Female111TemplateRampUp }) => {
+  const display = getFemale111ExerciseDisplay(action.exerciseId)
+  return <a className="female111-ramp-row" href={display.libraryHref} aria-label={`查看动作详情：${display.name}`}><span>{String(action.order).padStart(2, '0')}</span><div><b>{display.name}</b><p>{action.reason}</p><small>{formatFemale111ActionPrescription(action)} · 负荷指引：先用回归版本确认路径，再进入目标动作低剂量。</small></div><strong>{formatFemale111Rest(action.restSeconds)}</strong><ChevronRight size={15} aria-hidden="true" /></a>
+}
+
+const Female111MainActionCard = ({ action, index }: { action: Female111TemplateAction; index: number }) => {
+  const display = getFemale111ExerciseDisplay(action.exerciseId)
+  return <a className="exercise-card female111-course-action-card" href={display.libraryHref} aria-label={`查看动作详情：${display.name}`}><span className="exercise-number">{String(index + 1).padStart(2, '0')}</span><div className="female111-course-action-body"><div className="female111-course-action-top"><span>{getFemale111TemplateRoleLabel(action.role)}</span><small>{display.category} · {display.equipment} · 技术 {display.techniqueLevel}</small></div><h3>{display.name}</h3><p>{action.reason}</p><dl className="female111-action-meta"><div><dt>处方</dt><dd>{formatFemale111ActionPrescription(action)}</dd></div><div><dt>质量边界</dt><dd>{action.qualityBoundary}</dd></div><div><dt>进阶</dt><dd>{action.progression}</dd></div><div><dt>退阶</dt><dd>{action.regression}</dd></div></dl></div><strong>{formatFemale111Rest(action.restSeconds)}</strong><ChevronRight size={16} aria-hidden="true" /></a>
+}
+
+const Female111OptionalCard = ({ action }: { action: Female111TemplateAction }) => {
+  const display = getFemale111ExerciseDisplay(action.exerciseId)
+  return <a className="female111-optional-card" href={display.libraryHref} aria-label={`查看动作详情：${display.name}`}><div className="female111-optional-gate"><span>可选</span><b>主训练质量稳定且时间允许时保留</b></div><h3>{display.name}</h3><p>{action.reason}</p><dl className="female111-action-meta"><div><dt>处方</dt><dd>{formatFemale111ActionPrescription(action)}</dd></div><div><dt>时间影响</dt><dd>{female111TimeLabel(action.planningExecutionSeconds)}，外加 {formatFemale111Rest(action.restSeconds)} 与转场</dd></div></dl><ChevronRight size={16} aria-hidden="true" /></a>
+}
 
 const TemplateDetailPage = ({ id, level }: { id: string; level: 'l1' | 'l2' | 'l3' | 'l4' }) => {
   const template = getTemplate(id)
@@ -175,6 +301,8 @@ const FemaleTemplateDetailPage = ({ id }: { id: string }) => {
     </section>
   </div>
 }
+
+const Female111CoachPage = () => <Female111CoachProduct />
 
 const FemaleSlotCard = ({ slot }: { slot: FemaleRuntimeSlot }) => <section className="info-card">
   <h2>{slot.slot}</h2>

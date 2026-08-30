@@ -490,7 +490,7 @@ describe('7Fit V6 routing and shell', () => {
     expect(appSource.match(/getPostpartumPresentationBridgeRecord/g)).toHaveLength(6)
   })
 
-  it('renders a separate female runtime section on the templates page with eight dedicated links', () => {
+  it('renders the PPF111 template plus the eight legacy female runtime links on the templates page', () => {
     window.location.hash = '#/templates'
     render(<App />)
 
@@ -498,15 +498,18 @@ describe('7Fit V6 routing and shell', () => {
     const femaleSection = femaleHeading.closest('.section-block')
     if (!(femaleSection instanceof HTMLElement)) throw new Error('Missing female runtime section')
 
-    expect(within(femaleSection).getByText('8 个模板')).toBeInTheDocument()
+    expect(within(femaleSection).getAllByText('8 个编排模板')).toHaveLength(2)
     expect(within(femaleSection).queryByText('4 个方案等级')).toBeNull()
 
     const expectedLinks = femaleRuntimeTemplates.map(({ template }) => `#/female/${template.id}`)
-    const actualLinks = Array.from(femaleSection.querySelectorAll<HTMLAnchorElement>('a.template-card'))
+    expect(femaleSection.querySelector('a.female111-template-card')).toHaveAttribute('href', '#/templates/female111')
+    expect(femaleSection.querySelectorAll('a.female111-recipe-card')).toHaveLength(8)
+    const actualLinks = Array.from(femaleSection.querySelectorAll<HTMLAnchorElement>('.female111-legacy-catalog a.template-card'))
       .map((link) => link.getAttribute('href'))
 
     expect(actualLinks).toEqual(expectedLinks)
     expect(actualLinks.every((href) => typeof href === 'string' && !/\/l[1-4]$/.test(href))).toBe(true)
+    expect(within(femaleSection).getByText('PPF111')).toBeInTheDocument()
 
     for (const { template } of femaleRuntimeTemplates) {
       expect(within(femaleSection).getByText(template.code)).toBeInTheDocument()

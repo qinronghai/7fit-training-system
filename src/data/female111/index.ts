@@ -171,3 +171,12 @@ export type {
   Female111PrescriptionComparison,
   Female111PrescriptionVariable,
 } from './prescription'
+export {
+  formatFemale111ActionPrescription,
+  formatFemale111Prescription,
+  formatFemale111Range,
+  formatFemale111Rest,
+  getFemale111ExerciseDisplay,
+  getFemale111LateralityLabel,
+  getFemale111TemplateRoleLabel,
+} from './templateDisplay'
