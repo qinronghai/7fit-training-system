@@ -107,6 +107,13 @@ export {
   estimateFemale111TemplateMinutes,
   validateFemale111TemplateLevel,
 } from './templateRules'
+export { resolveFemale111TemplateSelection } from './templateSelection'
+export type {
+  Female111TemplateSelectionInput,
+  Female111TemplateSelectionIssue,
+  Female111TemplateSelectionIssueCode,
+  Female111TemplateSelectionResult,
+} from './templateSelection'
 export { validateFemale111Block } from './blockRules'
 export { resolveFemale111Block } from './blockResolver'
 export { composeFemale111Session } from './sessionComposer'
