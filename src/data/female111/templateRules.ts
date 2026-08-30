@@ -167,6 +167,66 @@ const hasFatigueSignals = (item: Female111TemplateAction): boolean => {
     && (rir?.min ?? Number.POSITIVE_INFINITY) <= 2
 }
 
+type ProgressionVariable = NonNullable<Female111TemplateLevelDefinition['progressionFromPrevious']>['variables'][number]
+
+type TrackedPrimaryField = {
+  path: string
+  variable: ProgressionVariable
+  read: (action: Female111TemplateAction) => unknown
+}
+
+const trackedPrimaryFields: readonly TrackedPrimaryField[] = [
+  { path: 'primary.prescription.sets', variable: 'volume', read: (action) => action.prescription.sets },
+  { path: 'primary.prescription.reps', variable: 'volume', read: (action) => action.prescription.reps },
+  { path: 'primary.prescription.durationSeconds', variable: 'volume', read: (action) => action.prescription.durationSeconds },
+  { path: 'primary.prescription.distanceMeters', variable: 'volume', read: (action) => action.prescription.distanceMeters },
+  { path: 'primary.prescription.rir', variable: 'output', read: (action) => action.prescription.rir },
+  { path: 'primary.prescription.rpe', variable: 'output', read: (action) => action.prescription.rpe },
+  { path: 'primary.restSeconds', variable: 'density', read: (action) => action.restSeconds },
+  { path: 'primary.qualityBoundary', variable: 'control', read: (action) => action.qualityBoundary },
+]
+
+const primaryAction = (level: Female111TemplateLevelDefinition): Female111TemplateAction | undefined => (
+  level.mainSequence.find((item) => item.role === 'PRIMARY')
+)
+
+const sameValue = (left: unknown, right: unknown): boolean => JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+
+const unique = <T,>(items: readonly T[]): T[] => [...new Set(items)]
+
+const trackedProgressionDelta = (
+  previous: Female111TemplateAction,
+  current: Female111TemplateAction,
+): {
+  changedFields: string[]
+  changedVariables: ProgressionVariable[]
+} => {
+  const changed = trackedPrimaryFields.filter((field) => !sameValue(field.read(previous), field.read(current)))
+  return {
+    changedFields: changed.map((field) => field.path),
+    changedVariables: unique(changed.map((field) => field.variable)),
+  }
+}
+
+const parseChangedFieldsNote = (note: string): string[] => {
+  const prefix = 'changed fields:'
+  if (!note.startsWith(prefix)) return []
+  return unique(
+    note
+      .slice(prefix.length)
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  )
+}
+
+const sameMembers = (left: readonly string[], right: readonly string[]): boolean => {
+  const normalizedLeft = [...unique(left)].sort()
+  const normalizedRight = [...unique(right)].sort()
+  return normalizedLeft.length === normalizedRight.length
+    && normalizedLeft.every((value, index) => value === normalizedRight[index])
+}
+
 export const estimateFemale111TemplateMinutes = (
   level: Female111TemplateLevelDefinition,
   options: { includeOptional?: boolean } = {},
@@ -305,6 +365,37 @@ export const validateFemale111TemplateLevel = (
 
   if (previousLevel && level.level !== 'l1' && previousLevel.recipeId !== level.recipeId) {
     issues.push(issue('PROGRESSION_MISSING', 'progressionFromPrevious', 'Progression evidence must compare levels from the same recipe.'))
+  }
+
+  if (previousLevel && level.level !== 'l1' && previousLevel.recipeId === level.recipeId) {
+    const previousPrimary = primaryAction(previousLevel)
+    const currentPrimary = primaryAction(level)
+    if (previousPrimary && currentPrimary) {
+      const actual = trackedProgressionDelta(previousPrimary, currentPrimary)
+      const metadata = level.progressionFromPrevious
+      const metadataFields = metadata ? parseChangedFieldsNote(metadata.note) : []
+      const metadataVariables = metadata ? unique(metadata.variables) : []
+
+      if (actual.changedVariables.length > 2) {
+        issues.push(issue(
+          'PROGRESSION_TOO_MANY_VARIABLES',
+          'progressionFromPrevious.variables',
+          `Actual adjacent progression changes more than two major variables: ${actual.changedVariables.join(', ')}.`,
+        ))
+      }
+
+      if (
+        !metadata
+        || !sameMembers(metadataFields, actual.changedFields)
+        || !sameMembers(metadataVariables, actual.changedVariables)
+      ) {
+        issues.push(issue(
+          'PROGRESSION_METADATA_MISMATCH',
+          'progressionFromPrevious',
+          `Progression metadata must match actual changed fields (${actual.changedFields.join(', ') || 'none'}) and variables (${actual.changedVariables.join(', ') || 'none'}).`,
+        ))
+      }
+    }
   }
 
   const withOptional = estimateFemale111TemplateMinutes(level, { includeOptional: true })

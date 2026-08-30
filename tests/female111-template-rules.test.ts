@@ -62,4 +62,34 @@ describe('PP-F111 template rules', () => {
     expect(validateFemale111TemplateLevel(invalid, previous).map((issue) => issue.code))
       .toContain('PROGRESSION_TOO_MANY_VARIABLES')
   })
+
+  it('rejects short progression metadata when the real adjacent delta changes three major fields', () => {
+    const current = getFemale111Template('F111-03', 'l2')!.level
+    const previous = getFemale111Template('F111-03', 'l1')!.level
+    const variables: NonNullable<typeof current.progressionFromPrevious>['variables'] = ['volume']
+    const invalid = {
+      ...current,
+      mainSequence: current.mainSequence.map((item) => (
+        item.role === 'PRIMARY'
+          ? {
+              ...item,
+              prescription: {
+                ...item.prescription,
+                sets: 4,
+                reps: { min: 10, max: 12 },
+                rir: 1,
+              },
+              restSeconds: 75,
+            }
+          : item
+      )),
+      progressionFromPrevious: { variables, note: 'changed fields: primary.prescription.sets' },
+    }
+
+    const codes = validateFemale111TemplateLevel(invalid, previous).map((issue) => issue.code)
+    expect(codes).toEqual(expect.arrayContaining([
+      'PROGRESSION_METADATA_MISMATCH',
+      'PROGRESSION_TOO_MANY_VARIABLES',
+    ]))
+  })
 })
