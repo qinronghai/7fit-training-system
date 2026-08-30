@@ -2,6 +2,7 @@ export type Route =
   | { name: 'home' }
   | { name: 'templates' }
   | { name: 'template-detail'; system: string; level: 'l1' | 'l2' | 'l3' | 'l4' }
+  | { name: 'female-template-detail'; id: string }
   | { name: 'patterns' }
   | { name: 'pattern-detail'; id: string }
   | { name: 'library' }
@@ -18,6 +19,7 @@ export const getRoute = (hash = window.location.hash): Route => {
   if (parts[0] === 'templates' && parts[1]) {
     return { name: 'template-detail', system: parts[1], level: (validLevels.has(parts[2]) ? parts[2] : 'l1') as TemplateRouteLevel }
   }
+  if (parts[0] === 'female' && parts[1]) return { name: 'female-template-detail', id: parts[1] }
   if (parts[0] === 'patterns' && parts[1]) return { name: 'pattern-detail', id: parts[1] }
   if (parts[0] === 'library' && parts[1] === 'action' && parts[2]) return { name: 'action-detail', id: parts[2] }
   if (parts[0] === 'library' && parts[1]) return { name: 'library-detail', id: parts[1] }

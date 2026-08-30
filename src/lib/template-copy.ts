@@ -17,7 +17,7 @@ export const buildTemplateCopyText = (template: Template, current: TemplateLevel
     ...current.warmup.map((item, index) => `${index + 1}. ${item.name}｜${item.tag}｜${item.prescription}`),
     '',
     `${current.sectionTitle || '主训练'}（${current.sectionCount || `${current.exercises.length} 个动作`}）`,
-    ...current.exercises.map((exercise, index) => `${index + 1}. ${exercise.name}｜${exercise.pattern}｜${exercise.prescription || '按模板完成'}`),
+    ...current.exercises.map((exercise, index) => `${index + 1}. ${exercise.name}｜${exercise.displayCategory ?? exercise.pattern}｜${exercise.prescription || '按模板完成'}`),
     '',
     '训练参数',
     ...current.metrics.map((metric) => `${metric.label}：${metric.value}`),
