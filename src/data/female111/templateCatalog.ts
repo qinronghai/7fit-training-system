@@ -258,12 +258,13 @@ const compatibilityAction = (
 })
 
 const compatibilityProjection = (level: Female111TemplateLevel): Female111TemplateCompatibilityProjection => {
+  const primePrep = level.prep.find((item) => item.phase === 'P')
   const primary = level.mainSequence.find((item) => item.role === 'PRIMARY')
   const support = level.mainSequence.find((item) => item.role === 'SUPPORT')
   const core = level.mainSequence.find((item) => item.role === 'CORE')
-  if (!primary || !support || !core) throw new Error(`Female111 template level missing compatibility slots: ${level.recipeId}/${level.level}`)
+  if (!primePrep || !primary || !support || !core) throw new Error(`Female111 template level missing compatibility slots: ${level.recipeId}/${level.level}`)
   return {
-    prep: compatibilityAction(level.prep[0]),
+    prep: compatibilityAction(primePrep),
     slots: {
       PRIMARY: compatibilityAction(primary),
       SUPPORT: compatibilityAction(support),

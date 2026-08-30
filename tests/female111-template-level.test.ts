@@ -102,4 +102,19 @@ describe('PP-F111 template level catalog', () => {
       }
     }
   })
+
+  it('projects the legacy single prep card from the template-specific P phase', () => {
+    for (const templateEntry of female111TemplateCatalog) {
+      const l1Prime = templateEntry.levels.l1.prep.find((item) => item.phase === 'P')!
+      expect(templateEntry.prep.exerciseId).toBe(l1Prime.exerciseId)
+      expect(templateEntry.prep.rationale).toBe(l1Prime.reason)
+
+      for (const level of ['l1', 'l2', 'l3', 'l4'] as const) {
+        const selected = getFemale111Template(templateEntry.recipeId, level)!
+        const prime = selected.level.prep.find((item) => item.phase === 'P')!
+        expect(selected.prep.exerciseId).toBe(prime.exerciseId)
+        expect(selected.prep.rationale).toBe(prime.reason)
+      }
+    }
+  })
 })
