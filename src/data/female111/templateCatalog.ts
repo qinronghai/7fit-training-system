@@ -1,10 +1,13 @@
 import { getExercise } from '../exercises'
 import { female111RecipeFamilies } from './blockRecipes'
+import { female111ProgressionFamilies } from './progression'
 import type {
   Female111RecoveryRecord,
   Female111Template,
   Female111TemplateAction,
   Female111TemplateCatalogEntry,
+  Female111TemplateCompatibilityProjection,
+  Female111TemplateExerciseProgressionLink,
   Female111TemplateLevel,
   Female111TemplateLevelDefinition,
   Female111TemplateLevelId,
@@ -29,6 +32,7 @@ type LevelSeed = {
   optional: string
   prepPrime: string
   progressionFromPrevious?: Female111TemplateLevelDefinition['progressionFromPrevious']
+  exerciseProgressionFromPrevious?: Female111TemplateExerciseProgressionLink
   coachNote: string
 }
 
@@ -38,6 +42,22 @@ const progressionEvidence = (
   variables: NonNullable<Female111TemplateLevelDefinition['progressionFromPrevious']>['variables'],
   note: string,
 ): NonNullable<Female111TemplateLevelDefinition['progressionFromPrevious']> => ({ variables, note })
+
+const edgeId = (from: string, to: string) => `${from}->${to}`
+
+const exerciseProgression = (
+  family: Female111TemplateExerciseProgressionLink['family'],
+  fromExerciseId: string,
+  toExerciseId: string,
+  sourceNodeIds: readonly string[],
+): Female111TemplateExerciseProgressionLink => ({
+  family,
+  direction: 'PROGRESSION',
+  fromExerciseId,
+  toExerciseId,
+  sourceNodeIds,
+  sourceEdgeIds: sourceNodeIds.slice(0, -1).map((from, index) => edgeId(from, sourceNodeIds[index + 1])),
+})
 
 const basePrescriptionByLevel: Readonly<Record<Female111TemplateLevelId, Prescription>> = {
   l1: { sets: 2, reps: { min: 6, max: 8 }, rir: 3, tempo: '3-1-2', rom: 'coach-limited clean range' },
@@ -208,6 +228,55 @@ const withCalculatedTime = (definition: Female111TemplateLevelDefinition): Femal
   }
 }
 
+const countText = (value: Prescription[keyof Prescription] | undefined): string | undefined => {
+  if (value === undefined) return undefined
+  if (typeof value === 'number') return String(value)
+  if (typeof value === 'object' && 'min' in value && 'max' in value) return `${value.min}-${value.max}`
+  return undefined
+}
+
+const formatPrescription = (prescription: Prescription): string => {
+  const parts = [
+    countText(prescription.sets) ? `${countText(prescription.sets)} 组` : undefined,
+    countText(prescription.reps) ? `${countText(prescription.reps)} 次` : undefined,
+    countText(prescription.durationSeconds) ? `${countText(prescription.durationSeconds)} 秒` : undefined,
+    countText(prescription.distanceMeters) ? `${countText(prescription.distanceMeters)} 米` : undefined,
+    countText(prescription.rir) ? `RIR ${countText(prescription.rir)}` : undefined,
+    prescription.tempo ? `节奏 ${prescription.tempo}` : undefined,
+  ].filter(Boolean)
+  return parts.join(' · ')
+}
+
+const compatibilityAction = (
+  action: Female111TemplatePrep | Female111TemplateRampUp | Female111TemplateAction,
+) => ({
+  exerciseId: action.exerciseId,
+  prescription: formatPrescription(action.prescription),
+  rationale: action.reason,
+  progression: action.progression,
+  regression: action.regression,
+})
+
+const compatibilityProjection = (level: Female111TemplateLevel): Female111TemplateCompatibilityProjection => {
+  const primary = level.mainSequence.find((item) => item.role === 'PRIMARY')
+  const support = level.mainSequence.find((item) => item.role === 'SUPPORT')
+  const core = level.mainSequence.find((item) => item.role === 'CORE')
+  if (!primary || !support || !core) throw new Error(`Female111 template level missing compatibility slots: ${level.recipeId}/${level.level}`)
+  return {
+    prep: compatibilityAction(level.prep[0]),
+    slots: {
+      PRIMARY: compatibilityAction(primary),
+      SUPPORT: compatibilityAction(support),
+      CORE: compatibilityAction(core),
+    },
+    coachFocus: level.coachNote,
+    progressionNote: level.exerciseProgressionFromPrevious
+      ? `${level.exerciseProgressionFromPrevious.fromExerciseId} -> ${level.exerciseProgressionFromPrevious.toExerciseId}`
+      : level.progressionFromPrevious?.note ?? primary.progression,
+    regressionNote: primary.regression,
+  }
+}
+
 const makeLevel = (seed: LevelSeed): Female111TemplateLevel => withCalculatedTime({
   recipeId: seed.recipeId,
   level: seed.level,
@@ -234,6 +303,7 @@ const makeLevel = (seed: LevelSeed): Female111TemplateLevel => withCalculatedTim
   ],
   recoveryRecord: recoveryRecord(seed.recipeId, seed.level),
   progressionFromPrevious: seed.progressionFromPrevious,
+  exerciseProgressionFromPrevious: seed.exerciseProgressionFromPrevious,
   coachNote: seed.coachNote,
 })
 
@@ -263,6 +333,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'kettlebell-halo',
     prepPrime: 'squat',
     progressionFromPrevious: progressionEvidence(['volume'], 'changed fields: primary.prescription.sets, primary.prescription.reps'),
+    exerciseProgressionFromPrevious: exerciseProgression('SQUAT', 'box-squat', 'squat', ['exp-box-squat', 'pp01']),
     coachNote: '升级只发生在深蹲重复性稳定之后。',
   },
   {
@@ -277,6 +348,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'seated-dumbbell-shoulder-press',
     prepPrime: 'squat',
     progressionFromPrevious: progressionEvidence(['range', 'control'], 'changed fields: primary.exerciseId, primary.qualityBoundary'),
+    exerciseProgressionFromPrevious: exerciseProgression('SQUAT', 'squat', 'goblet-box-squat', ['pp01', 'goblet-box-squat']),
     coachNote: '负重不取代动作范围质量，箱高仍可回退。',
   },
   {
@@ -291,6 +363,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'face-pull',
     prepPrime: 'squat',
     progressionFromPrevious: progressionEvidence(['load', 'output'], 'changed fields: primary.exerciseId, primary.prescription.rir'),
+    exerciseProgressionFromPrevious: exerciseProgression('SQUAT', 'goblet-box-squat', 'goblet-squat', ['goblet-box-squat', 'goblet-squat']),
     coachNote: '只把高脚杯深蹲作为主挑战，支撑动作保持低疲劳。',
   },
   {
@@ -318,6 +391,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'cable-pull-through',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['load'], 'changed fields: primary.exerciseId, primary.prescription.rir'),
+    exerciseProgressionFromPrevious: exerciseProgression('HINGE', 'hinge-drill', 'kettlebell-deadlift', ['pp02', 'kettlebell-deadlift']),
     coachNote: '负荷增加后，四点支撑不再同步升级。',
   },
   {
@@ -332,6 +406,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'farmer-carry',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['range', 'control'], 'changed fields: primary.exerciseId, primary.prescription.tempo'),
+    exerciseProgressionFromPrevious: exerciseProgression('HINGE', 'kettlebell-deadlift', 'dumbbell-rdl', ['kettlebell-deadlift', 'dumbbell-rdl']),
     coachNote: 'L3 回归路径是壶铃硬拉或抬高起始位置。',
   },
   {
@@ -346,6 +421,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'farmer-carry',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['load', 'output'], 'changed fields: primary.exerciseId, primary.prescription.sets'),
+    exerciseProgressionFromPrevious: exerciseProgression('HINGE', 'dumbbell-rdl', 'double-dumbbell-rdl', ['dumbbell-rdl', 'double-dumbbell-rdl']),
     coachNote: '如果握力或背部位置限制输出，回到单哑铃或壶铃版本。',
   },
   {
@@ -373,6 +449,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'suitcase-carry',
     prepPrime: 'standing-march',
     progressionFromPrevious: progressionEvidence(['volume'], 'changed fields: primary.prescription.sets, primary.prescription.reps'),
+    exerciseProgressionFromPrevious: exerciseProgression('SINGLE_LEG', 'low-box-step-up', 'split-squat', ['low-box-step-up', 'split-squat']),
     coachNote: '站距、范围和扶持一次只调整一个。',
   },
   {
@@ -387,6 +464,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'suitcase-carry',
     prepPrime: 'standing-march',
     progressionFromPrevious: progressionEvidence(['range', 'control'], 'changed fields: primary.exerciseId, primary.qualityBoundary'),
+    exerciseProgressionFromPrevious: exerciseProgression('SINGLE_LEG', 'split-squat', 'reverse-lunge', ['split-squat', 'reverse-lunge']),
     coachNote: 'L3 失控时回到分腿蹲，不把 Pallof 加重当补偿。',
   },
   {
@@ -401,6 +479,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'suitcase-carry',
     prepPrime: 'standing-march',
     progressionFromPrevious: progressionEvidence(['range', 'output'], 'changed fields: primary.exerciseId, primary.prescription.rir'),
+    exerciseProgressionFromPrevious: exerciseProgression('SINGLE_LEG', 'reverse-lunge', 'front-foot-elevated-split-squat', ['reverse-lunge', 'front-foot-elevated-split-squat']),
     coachNote: '前脚垫高只在膝线和骨盆控制稳定时使用。',
   },
   {
@@ -428,6 +507,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'single-leg-stand',
     prepPrime: 'glute-bridge',
     progressionFromPrevious: progressionEvidence(['volume'], 'changed fields: primary.prescription.sets, primary.prescription.reps'),
+    exerciseProgressionFromPrevious: exerciseProgression('HIP_EXTENSION', 'glute-bridge', 'glute-bridge-abduction', ['pp10', 'glute-bridge-abduction']),
     coachNote: '弹力带只服务于控制，不用更强弹力破坏骨盆位置。',
   },
   {
@@ -442,6 +522,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'single-leg-stand',
     prepPrime: 'glute-bridge',
     progressionFromPrevious: progressionEvidence(['range', 'control'], 'changed fields: primary.exerciseId, primary.qualityBoundary'),
+    exerciseProgressionFromPrevious: exerciseProgression('HIP_EXTENSION', 'glute-bridge-abduction', 'hip-thrust', ['glute-bridge-abduction', 'hip-thrust']),
     coachNote: 'L3 回归到臀桥外展或双侧臀桥。',
   },
   {
@@ -456,6 +537,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'single-leg-stand',
     prepPrime: 'glute-bridge',
     progressionFromPrevious: progressionEvidence(['control', 'output'], 'changed fields: primary.exerciseId, primary.prescription.rir'),
+    exerciseProgressionFromPrevious: exerciseProgression('HIP_EXTENSION', 'hip-thrust', 'single-leg-glute-bridge', ['hip-thrust', 'exp-single-leg-glute-bridge']),
     coachNote: '单侧髋伸展失去骨盆控制时立即回到双侧版本。',
   },
   {
@@ -483,6 +565,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'front-rack-carry',
     prepPrime: 'squat',
     progressionFromPrevious: progressionEvidence(['volume'], 'changed fields: primary.prescription.sets, primary.prescription.reps'),
+    exerciseProgressionFromPrevious: exerciseProgression('SQUAT', 'goblet-box-squat', 'goblet-squat', ['goblet-box-squat', 'goblet-squat']),
     coachNote: '支持和核心动作不因深蹲升级而同步加难。',
   },
   {
@@ -497,6 +580,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'front-rack-carry',
     prepPrime: 'squat',
     progressionFromPrevious: progressionEvidence(['load', 'control'], 'changed fields: primary.exerciseId, primary.qualityBoundary'),
+    exerciseProgressionFromPrevious: exerciseProgression('SQUAT', 'goblet-squat', 'double-dumbbell-front-squat', ['goblet-squat', 'double-dumbbell-front-squat']),
     coachNote: 'L3 可回到高脚杯深蹲，前架位置不可压迫呼吸。',
   },
   {
@@ -511,6 +595,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'front-rack-carry',
     prepPrime: 'squat',
     progressionFromPrevious: progressionEvidence(['load', 'output'], 'changed fields: primary.exerciseId, primary.prescription.sets'),
+    exerciseProgressionFromPrevious: exerciseProgression('SQUAT', 'double-dumbbell-front-squat', 'hack-squat', ['double-dumbbell-front-squat', 'hack-squat']),
     coachNote: '机器输出稳定时才保留 L4，否则回到自由重量可控版本。',
   },
   {
@@ -538,6 +623,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'face-pull',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['load'], 'changed fields: primary.exerciseId, primary.prescription.rir'),
+    exerciseProgressionFromPrevious: exerciseProgression('INTEGRATED_COMPOUND', 'kettlebell-deadlift', 'dumbbell-rdl', ['kettlebell-deadlift', 'dumbbell-rdl']),
     coachNote: 'RDL 是主挑战，支撑动作不可变成第二个高挑战。',
   },
   {
@@ -552,6 +638,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'face-pull',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['control', 'output'], 'changed fields: primary.exerciseId, primary.qualityBoundary'),
+    exerciseProgressionFromPrevious: exerciseProgression('INTEGRATED_COMPOUND', 'dumbbell-rdl', 'deadlift-to-overhead-press', ['dumbbell-rdl', 'deadlift-to-overhead-press']),
     coachNote: 'L3 失效时拆回硬拉和坐姿推举，不硬撑整合。',
   },
   {
@@ -566,6 +653,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'face-pull',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['volume', 'density'], 'changed fields: primary.prescription.sets, primary.restSeconds'),
+    exerciseProgressionFromPrevious: exerciseProgression('INTEGRATED_COMPOUND', 'deadlift-to-overhead-press', 'deadlift-to-overhead-press', ['deadlift-to-overhead-press']),
     coachNote: '只增加连续性或负荷之一，保留拆分动作回归。',
   },
   {
@@ -593,6 +681,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'side-lying-open-book',
     prepPrime: 'standing-march',
     progressionFromPrevious: progressionEvidence(['volume'], 'changed fields: primary.prescription.sets, primary.prescription.reps'),
+    exerciseProgressionFromPrevious: exerciseProgression('LOCOMOTION', 'standing-march', 'low-box-step-up', ['exp-standing-march', 'low-box-step-up']),
     coachNote: '台阶高度和负荷不同时升级。',
   },
   {
@@ -607,6 +696,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'suitcase-carry',
     prepPrime: 'standing-march',
     progressionFromPrevious: progressionEvidence(['range', 'control'], 'changed fields: primary.exerciseId, primary.qualityBoundary'),
+    exerciseProgressionFromPrevious: exerciseProgression('LOCOMOTION', 'low-box-step-up', 'lateral-lunge', ['low-box-step-up', 'lateral-lunge']),
     coachNote: 'L3 可回到上台阶或缩小侧向范围。',
   },
   {
@@ -621,6 +711,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'suitcase-carry',
     prepPrime: 'standing-march',
     progressionFromPrevious: progressionEvidence(['range', 'output'], 'changed fields: primary.exerciseId, primary.prescription.rir'),
+    exerciseProgressionFromPrevious: exerciseProgression('LOCOMOTION', 'lateral-lunge', 'duck-walk', ['lateral-lunge', 'duck-walk']),
     coachNote: '低位移动失控时提高身体位置并减少距离。',
   },
   {
@@ -648,6 +739,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'front-rack-carry',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['load'], 'changed fields: primary.exerciseId, primary.prescription.rir'),
+    exerciseProgressionFromPrevious: exerciseProgression('INTEGRATED_COMPOUND', 'kettlebell-deadlift', 'farmer-carry', ['kettlebell-deadlift', 'farmer-carry']),
     coachNote: '行走负重不应牺牲呼吸或躯干位置。',
   },
   {
@@ -662,6 +754,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'kettlebell-halo',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['control', 'output'], 'changed fields: primary.exerciseId, primary.qualityBoundary'),
+    exerciseProgressionFromPrevious: exerciseProgression('INTEGRATED_COMPOUND', 'farmer-carry', 'deadlift-to-overhead-press', ['farmer-carry', 'deadlift-to-overhead-press']),
     coachNote: 'L3 回归为硬拉和推举拆分，动态核心缩短距离。',
   },
   {
@@ -676,6 +769,7 @@ const catalogLevelSeeds: readonly LevelSeed[] = [
     optional: 'kettlebell-halo',
     prepPrime: 'hinge-drill',
     progressionFromPrevious: progressionEvidence(['volume', 'density'], 'changed fields: primary.prescription.sets, primary.restSeconds'),
+    exerciseProgressionFromPrevious: exerciseProgression('INTEGRATED_COMPOUND', 'deadlift-to-overhead-press', 'deadlift-to-overhead-press', ['deadlift-to-overhead-press']),
     coachNote: '全身整合只升级一个变量，动态核心不抢主挑战。',
   },
 ]
@@ -694,15 +788,17 @@ const levelsByRecipe = catalogLevelSeeds.reduce((result, seed) => {
 export const female111TemplateCatalog: readonly Female111TemplateCatalogEntry[] = female111RecipeFamilies.map((recipe) => {
   const levels = levelsByRecipe.get(recipe.id)
   if (!levels) throw new Error(`Female111 template catalog missing recipe: ${recipe.id}`)
+  const levelRecord = {
+    l1: levels.get('l1')!,
+    l2: levels.get('l2')!,
+    l3: levels.get('l3')!,
+    l4: levels.get('l4')!,
+  }
   return {
+    ...compatibilityProjection(levelRecord.l1),
     recipe,
     recipeId: recipe.id,
-    levels: {
-      l1: levels.get('l1')!,
-      l2: levels.get('l2')!,
-      l3: levels.get('l3')!,
-      l4: levels.get('l4')!,
-    },
+    levels: levelRecord,
   }
 })
 
@@ -712,6 +808,46 @@ const allLevelActions = (level: Female111TemplateLevel) => [
   ...level.mainSequence,
   ...level.optionalAccessory,
 ]
+
+const primaryAction = (level: Female111TemplateLevel) => level.mainSequence.find((item) => item.role === 'PRIMARY')
+
+const validateExerciseProgression = (
+  template: Female111TemplateCatalogEntry,
+  level: Female111TemplateLevel,
+  previousLevel: Female111TemplateLevel,
+) => {
+  const link = level.exerciseProgressionFromPrevious
+  const primary = primaryAction(level)
+  const previousPrimary = primaryAction(previousLevel)
+  if (!link || !primary || !previousPrimary) {
+    throw new Error(`Female111 template level must declare primary exercise progression linkage: ${template.recipeId}/${level.level}`)
+  }
+  if (
+    link.family !== template.recipe.primaryFamily
+    || link.direction !== 'PROGRESSION'
+    || link.fromExerciseId !== previousPrimary.exerciseId
+    || link.toExerciseId !== primary.exerciseId
+  ) {
+    throw new Error(`Female111 template exercise progression identity mismatch: ${template.recipeId}/${level.level}`)
+  }
+  if (!getExercise(link.fromExerciseId) || !getExercise(link.toExerciseId)) {
+    throw new Error(`Female111 template exercise progression must use canonical exercises: ${template.recipeId}/${level.level}`)
+  }
+  const family = female111ProgressionFamilies.find((item) => item.slot === 'PRIMARY' && item.family === link.family)
+  if (!family) throw new Error(`Female111 template progression family missing: ${template.recipeId}/${level.level}`)
+
+  const nodes = link.sourceNodeIds.map((nodeId) => family.nodes.find((node) => node.id === nodeId))
+  if (nodes.some((node) => !node)) throw new Error(`Female111 template progression source node missing: ${template.recipeId}/${level.level}`)
+  if (nodes[0]?.exerciseId !== link.fromExerciseId || nodes[nodes.length - 1]?.exerciseId !== link.toExerciseId) {
+    throw new Error(`Female111 template progression source node endpoint mismatch: ${template.recipeId}/${level.level}`)
+  }
+  for (const sourceEdgeId of link.sourceEdgeIds) {
+    const [from, to] = sourceEdgeId.split('->')
+    if (!family.edges.some((edge) => edge.from === from && edge.to === to && edge.direction === link.direction)) {
+      throw new Error(`Female111 template progression source edge missing: ${template.recipeId}/${level.level}/${sourceEdgeId}`)
+    }
+  }
+}
 
 const validateCatalog = () => {
   const expectedRecipeIds = new Set(female111RecipeFamilies.map((recipe) => recipe.id))
@@ -741,6 +877,10 @@ const validateCatalog = () => {
       if (levelId !== 'l1' && (!level.progressionFromPrevious || level.progressionFromPrevious.variables.length > 2)) {
         throw new Error(`Female111 L2-L4 must declare bounded progression evidence: ${template.recipeId}/${levelId}`)
       }
+      if (levelId !== 'l1') {
+        const previousLevelId = female111TemplateLevelIds[female111TemplateLevelIds.indexOf(levelId) - 1]
+        validateExerciseProgression(template, level, template.levels[previousLevelId])
+      }
       for (const item of allLevelActions(level)) {
         if (!getExercise(item.exerciseId)) throw new Error(`Female111 template references an unknown Exercise: ${item.exerciseId}`)
         if (typeof item.prescription !== 'object' || item.prescription === null) {
@@ -762,6 +902,7 @@ export const getFemale111Template = (
   const selectedLevel = catalogEntry?.levels[level]
   if (!catalogEntry || !recipe || !selectedLevel) return undefined
   return {
+    ...compatibilityProjection(selectedLevel),
     recipe,
     recipeId,
     level: selectedLevel,

@@ -5,7 +5,9 @@ import type {
   NumericRange,
   ProgressionEvidence,
 } from '../programming/types'
+import type { Female111ProgressionDirection } from './progression'
 import type { Female111RecipeFamily } from './types'
+import type { Female111ProgressionFamily } from './types'
 
 export type Female111TemplateLevelId = 'l1' | 'l2' | 'l3' | 'l4'
 export type Female111TemplateRole = 'PRIMARY' | 'SUPPORT' | 'CORE' | 'ACCESSORY'
@@ -40,6 +42,15 @@ export type Female111TemplateAction = Female111TemplateWorkItem & {
   role: Female111TemplateRole
 }
 
+export type Female111TemplateExerciseProgressionLink = {
+  family: Female111ProgressionFamily
+  direction: Female111ProgressionDirection
+  fromExerciseId: string
+  toExerciseId: string
+  sourceNodeIds: readonly string[]
+  sourceEdgeIds: readonly string[]
+}
+
 export type Female111RecoveryRecord = {
   id: string
   required: true
@@ -57,6 +68,7 @@ export type Female111TemplateLevelDefinition = {
   optionalAccessory: Female111TemplateAction[]
   recoveryRecord: Female111RecoveryRecord
   progressionFromPrevious?: ProgressionEvidence
+  exerciseProgressionFromPrevious?: Female111TemplateExerciseProgressionLink
   coachNote: string
 }
 
@@ -70,13 +82,29 @@ export type Female111TemplateLevel = Female111TemplateLevelDefinition & {
   timeEstimate: Female111TemplateTimeEstimate
 }
 
-export type Female111Template = {
+export type Female111TemplateCompatibilityAction = {
+  exerciseId: string
+  prescription: string
+  rationale: string
+  progression: string
+  regression: string
+}
+
+export type Female111TemplateCompatibilityProjection = {
+  prep: Female111TemplateCompatibilityAction
+  slots: Readonly<Record<'PRIMARY' | 'SUPPORT' | 'CORE', Female111TemplateCompatibilityAction>>
+  coachFocus: string
+  progressionNote: string
+  regressionNote: string
+}
+
+export type Female111Template = Female111TemplateCompatibilityProjection & {
   recipe: Female111RecipeFamily
   recipeId: string
   level: Female111TemplateLevel
 }
 
-export type Female111TemplateCatalogEntry = {
+export type Female111TemplateCatalogEntry = Female111TemplateCompatibilityProjection & {
   recipe: Female111RecipeFamily
   recipeId: string
   levels: Readonly<Record<Female111TemplateLevelId, Female111TemplateLevel>>

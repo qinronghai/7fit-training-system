@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { getExercise } from '../src/data/exercises'
 import {
+  female111ProgressionFamilies,
   female111RecipeFamilies,
   female111TemplateCatalog,
   getFemale111Template,
@@ -60,6 +61,44 @@ describe('PP-F111 template level catalog', () => {
           expect(current.progressionFromPrevious?.variables.length).toBeLessThanOrEqual(2)
           expect(current.progressionFromPrevious?.note).toMatch(/changed fields:/)
         }
+      }
+    }
+  })
+
+  it('records primary exercise replacements through the Female111 progression graph', () => {
+    for (const recipe of female111RecipeFamilies) {
+      let previousPrimary = getFemale111Template(recipe.id, 'l1')!.level.mainSequence.find((item) => item.role === 'PRIMARY')!
+      for (const level of ['l2', 'l3', 'l4'] as const) {
+        const current = getFemale111Template(recipe.id, level)!.level
+        const currentPrimary = current.mainSequence.find((item) => item.role === 'PRIMARY')!
+        const linkage = current.exerciseProgressionFromPrevious
+        expect(linkage).toMatchObject({
+          family: recipe.primaryFamily,
+          direction: 'PROGRESSION',
+          fromExerciseId: previousPrimary.exerciseId,
+          toExerciseId: currentPrimary.exerciseId,
+        })
+        expect(getExercise(linkage!.fromExerciseId)).toBeTruthy()
+        expect(getExercise(linkage!.toExerciseId)).toBeTruthy()
+
+        const family = female111ProgressionFamilies.find((item) => item.slot === 'PRIMARY' && item.family === linkage!.family)
+        expect(family).toBeDefined()
+
+        const sourceNodes = linkage!.sourceNodeIds.map((nodeId) => family!.nodes.find((node) => node.id === nodeId))
+        expect(sourceNodes.every(Boolean)).toBe(true)
+        expect(sourceNodes[0]?.exerciseId).toBe(linkage!.fromExerciseId)
+        expect(sourceNodes.at(-1)?.exerciseId).toBe(linkage!.toExerciseId)
+
+        if (linkage!.fromExerciseId !== linkage!.toExerciseId) expect(linkage!.sourceEdgeIds.length).toBeGreaterThan(0)
+        for (const edgeId of linkage!.sourceEdgeIds) {
+          const [from, to] = edgeId.split('->')
+          expect(family!.edges).toContainEqual(expect.objectContaining({
+            direction: linkage!.direction,
+            from,
+            to,
+          }))
+        }
+        previousPrimary = currentPrimary
       }
     }
   })
