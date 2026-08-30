@@ -3,7 +3,7 @@ import { buildFemale111CoachViewModel } from './coachViewModel'
 import { buildFemale111Session } from './sessionBuilder'
 import { evaluateFemale111PopulationOverlay } from './populationOverlay'
 import { resolveFemale111Block } from './blockResolver'
-import { resolveFemale111TemplateSelection, type Female111TemplateSelectionIssue } from './templateSelection'
+import { resolveFemale111TemplateSelectionRequest, type Female111TemplateSelectionIssue } from './templateSelection'
 import { evaluateFemale111Venue } from './venueRules'
 import type {
   Female111CoachViewModel,
@@ -126,12 +126,10 @@ const coachPlanDefinitions: Readonly<Record<Female111CoachPlanId, CoachPlanDefin
 export const buildFemale111CoachProduct = (
   input: Female111CoachProductInput,
 ): Female111CoachProductResult => {
-  const templateSelection = input.templateRecipeId
-    ? resolveFemale111TemplateSelection({
-      recipeId: input.templateRecipeId,
-      level: input.templateLevel ?? 'l1',
-    })
-    : { issues: [] }
+  const templateSelection = resolveFemale111TemplateSelectionRequest({
+    templateRecipeId: input.templateRecipeId,
+    templateLevel: input.templateLevel,
+  })
   const planId = input.planId ?? 'SQUAT_AND_LOCOMOTION'
   const plan = coachPlanDefinitions[planId]
   const blockAResolution = resolveFemale111Block(plan.blockA, {
