@@ -1,0 +1,68 @@
+import type { Female111RecipeFamily } from './types'
+
+export const female111RecipeFamilies: readonly Female111RecipeFamily[] = [
+  {
+    id: 'F111-01',
+    name: 'Squat + Anterior Support + Anti-extension',
+    primaryFamily: 'SQUAT',
+    supportFamily: 'ANTERIOR_SUPPORT',
+    coreFamily: 'ANTI_EXTENSION',
+    rationale: 'Build a repeatable squat stimulus while support and trunk control remain low-footprint.',
+  },
+  {
+    id: 'F111-02',
+    name: 'Hinge + Quadruped + Lateral Core',
+    primaryFamily: 'HINGE',
+    supportFamily: 'QUADRUPED_SUPPORT',
+    coreFamily: 'LATERAL_SUPPORT',
+    rationale: 'Pair a hinge pattern with contralateral support and lateral trunk capacity.',
+  },
+  {
+    id: 'F111-03',
+    name: 'Single Leg + Dynamic Support + Anti-rotation',
+    primaryFamily: 'SINGLE_LEG',
+    supportFamily: 'DYNAMIC_SUPPORT',
+    coreFamily: 'ANTI_ROTATION',
+    rationale: 'Progress single-side control while preserving a clear support and trunk challenge boundary.',
+  },
+  {
+    id: 'F111-04',
+    name: 'Hip Extension + Lateral Support + Anti-extension',
+    primaryFamily: 'HIP_EXTENSION',
+    supportFamily: 'LATERAL_SUPPORT',
+    coreFamily: 'ANTI_EXTENSION',
+    rationale: 'Organize hip extension with lateral capacity and a controlled anti-extension demand.',
+  },
+  {
+    id: 'F111-05',
+    name: 'Squat Integration + Quadruped + Lateral Core',
+    primaryFamily: 'SQUAT',
+    supportFamily: 'QUADRUPED_SUPPORT',
+    coreFamily: 'LATERAL_SUPPORT',
+    rationale: 'Connect squat output to contralateral support without requiring every selection to be complex.',
+  },
+  {
+    id: 'F111-06',
+    name: 'Hinge/Pull Integration + Dynamic Support + Anti-rotation',
+    primaryFamily: 'INTEGRATED_COMPOUND',
+    supportFamily: 'DYNAMIC_SUPPORT',
+    coreFamily: 'ANTI_ROTATION',
+    rationale: 'Reserve integrated hinge/pull work for members with the required coordination and force transfer.',
+  },
+  {
+    id: 'F111-07',
+    name: 'Locomotion/Single-Leg + Weight-Shift Support + Core Control',
+    primaryFamily: 'LOCOMOTION',
+    supportFamily: 'FRONTAL_PLANE',
+    coreFamily: 'ROTATION_CONTROL',
+    rationale: 'Use locomotion and weight shift as the primary theme while keeping rotation control distinct.',
+  },
+  {
+    id: 'F111-08',
+    name: 'Integrated Full Body + Support Integration + Dynamic Core',
+    primaryFamily: 'INTEGRATED_COMPOUND',
+    supportFamily: 'DYNAMIC_SUPPORT',
+    coreFamily: 'DYNAMIC_CORE',
+    rationale: 'Reserve full-body integration for coach-confirmed prerequisites and one clearly bounded challenge.',
+  },
+]
