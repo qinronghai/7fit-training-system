@@ -24,6 +24,24 @@ describe('PP-F111 template rules', () => {
     expect(estimate.totalMinutes.max).toBeLessThanOrEqual(60)
   })
 
+  it('counts only between-set rest and gives one-set prep and ramp actions zero set rest', () => {
+    const source = getFemale111Template('F111-03', 'l1')!.level
+    const level = {
+      ...source,
+      prep: source.prep.map((item) => ({
+        ...item,
+        prescription: { ...item.prescription, sets: 1 },
+        restSeconds: 99,
+      })),
+      rampUp: source.rampUp.map((item) => ({ ...item, restSeconds: 88 })),
+    }
+
+    expect(estimateFemale111TemplateMinutes(level).components.setRestSeconds).toEqual({
+      min: 180,
+      max: 180,
+    })
+  })
+
   it('rejects missing phases, missing prescription, missing role coverage, and over-budget optional work', () => {
     const source = getFemale111Template('F111-03', 'l1')!.level
     const invalid = {
@@ -91,5 +109,29 @@ describe('PP-F111 template rules', () => {
       'PROGRESSION_METADATA_MISMATCH',
       'PROGRESSION_TOO_MANY_VARIABLES',
     ]))
+  })
+
+  it('tracks tempo and ROM changes in same-exercise adjacent progression', () => {
+    const current = getFemale111Template('F111-06', 'l4')!.level
+    const previous = getFemale111Template('F111-06', 'l3')!.level
+    const invalid = {
+      ...current,
+      mainSequence: current.mainSequence.map((item) => (
+        item.role === 'PRIMARY'
+          ? {
+              ...item,
+              prescription: {
+                ...item.prescription,
+                tempo: '1-0-1',
+                rom: 'shortened test range',
+              },
+            }
+          : item
+      )),
+    }
+
+    const codes = validateFemale111TemplateLevel(invalid, previous).map((issue) => issue.code)
+    expect(codes).toContain('PROGRESSION_METADATA_MISMATCH')
+    expect(codes).toContain('PROGRESSION_TOO_MANY_VARIABLES')
   })
 })

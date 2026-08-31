@@ -182,6 +182,8 @@ const trackedPrimaryFields: readonly TrackedPrimaryField[] = [
   { path: 'primary.prescription.distanceMeters', variable: 'volume', read: (action) => action.prescription.distanceMeters },
   { path: 'primary.prescription.rir', variable: 'output', read: (action) => action.prescription.rir },
   { path: 'primary.prescription.rpe', variable: 'output', read: (action) => action.prescription.rpe },
+  { path: 'primary.prescription.tempo', variable: 'control', read: (action) => action.prescription.tempo },
+  { path: 'primary.prescription.rom', variable: 'range', read: (action) => action.prescription.rom },
   { path: 'primary.restSeconds', variable: 'density', read: (action) => action.restSeconds },
   { path: 'primary.qualityBoundary', variable: 'control', read: (action) => action.qualityBoundary },
 ]
@@ -227,6 +229,17 @@ const sameMembers = (left: readonly string[], right: readonly string[]): boolean
     && normalizedLeft.every((value, index) => value === normalizedRight[index])
 }
 
+const estimateSetRest = (item: Female111TemplateWorkItem): NumericRange => {
+  const sets = countRange(item.prescription.sets)
+  const rest = countRange(item.restSeconds)
+  if (!sets || !rest) return zeroRange()
+
+  return multiplyRange(rest, {
+    min: Math.max(sets.min - 1, 0),
+    max: Math.max(sets.max - 1, 0),
+  })
+}
+
 export const estimateFemale111TemplateMinutes = (
   level: Female111TemplateLevelDefinition,
   options: { includeOptional?: boolean } = {},
@@ -237,7 +250,7 @@ export const estimateFemale111TemplateMinutes = (
   const rampUpSeconds = sumPlanningSeconds(level.rampUp)
   const mainWorkSeconds = sumPlanningSeconds(level.mainSequence)
   const optionalSeconds = includeOptional ? sumPlanningSeconds(level.optionalAccessory) : zeroRange()
-  const setRestSeconds = sumCountField(includedItems, (item) => item.restSeconds)
+  const setRestSeconds = sumDerivedComponent(includedItems, estimateSetRest)
   const transitionSeconds = sumCountField(includedItems, (item) => item.transitionAfterSeconds)
   const unilateralAdjustmentSeconds = sumDerivedComponent(includedItems, estimateUnilateralAdjustment)
   const equipmentCoachBufferSeconds = sumDerivedComponent(includedItems, estimateEquipmentCoachBuffer)
